@@ -19,7 +19,7 @@
 
 [Blackbox](https://blackbox.xcode.cx/) is a powerful AI-driven debugging tool for any language. It allows AI to seamlessly set breakpoints, start/stop debug sessions, inspect variables, and navigate code using [MCP](https://modelcontextprotocol.io/) tools. It works out-of-the-box with any Debug Adapter Protocol (DAP) compatible debugger, including PHP, Node.js, Python, Go, C/C++, Java, and more!
 
-Made with ❤️ by Akash Aman
+Made with ❤️ by [Akash Aman](https://linktr.ee/akash_aman)
 
 ---
 
