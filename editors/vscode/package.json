@@ -1,5 +1,5 @@
 {
-    "name": "blackbox",
+    "name": "blackbox-mcp",
     "displayName": "Blackbox",
     "description": "AI-driven debugging — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via MCP tools.",
     "version": "0.1.0",
