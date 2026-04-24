@@ -1,0 +1,348 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Blackbox Tool Definitions",
+    "description": "Canonical tool contract for the Blackbox multi-IDE debugger. All IDE implementations must expose these tools with matching names and input schemas.",
+    "version": "0.1.0",
+    "tools": [
+        {
+            "name": "debug_set_breakpoint",
+            "displayName": "Set Breakpoint",
+            "description": "Set breakpoints in source files to pause execution. Supports conditions and log messages.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "Absolute file path"
+                    },
+                    "line": {
+                        "type": "number",
+                        "description": "Line number (1-based)"
+                    },
+                    "condition": {
+                        "type": "string",
+                        "description": "Optional condition expression"
+                    },
+                    "logMessage": {
+                        "type": "string",
+                        "description": "Optional log message (logpoint)"
+                    },
+                    "breakpoints": {
+                        "type": "array",
+                        "description": "Batch: array of {file, line, condition?, logMessage?}",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file": {
+                                    "type": "string"
+                                },
+                                "line": {
+                                    "type": "number"
+                                },
+                                "condition": {
+                                    "type": "string"
+                                },
+                                "logMessage": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "file",
+                                "line"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "debug_remove_breakpoint",
+            "displayName": "Remove Breakpoint",
+            "description": "Remove one or more breakpoints by file and line.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "Absolute file path"
+                    },
+                    "line": {
+                        "type": "number",
+                        "description": "Line number (1-based)"
+                    },
+                    "breakpoints": {
+                        "type": "array",
+                        "description": "Batch: array of {file, line}",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file": {
+                                    "type": "string"
+                                },
+                                "line": {
+                                    "type": "number"
+                                }
+                            },
+                            "required": [
+                                "file",
+                                "line"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "debug_remove_all_breakpoints",
+            "displayName": "Remove All Breakpoints",
+            "description": "Remove all breakpoints at once."
+        },
+        {
+            "name": "debug_list_breakpoints",
+            "displayName": "List Breakpoints",
+            "description": "List all currently set breakpoints with file, line, condition, and enabled status."
+        },
+        {
+            "name": "debug_start",
+            "displayName": "Start Debug Session",
+            "description": "Start a debug session for any language using the Debug Adapter Protocol.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "Debug adapter type (e.g. php, node, python, go, cppdbg)"
+                    },
+                    "request": {
+                        "type": "string",
+                        "description": "launch or attach"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Session display name"
+                    },
+                    "port": {
+                        "type": "number",
+                        "description": "Debug port"
+                    },
+                    "program": {
+                        "type": "string",
+                        "description": "Program to debug (for launch)"
+                    },
+                    "pathMappings": {
+                        "type": "object",
+                        "description": "Remote to local path mappings"
+                    }
+                },
+                "required": [
+                    "type",
+                    "request"
+                ]
+            }
+        },
+        {
+            "name": "debug_stop",
+            "displayName": "Stop Debug Session",
+            "description": "Stop the currently active debug session."
+        },
+        {
+            "name": "debug_restart",
+            "displayName": "Restart Debug Session",
+            "description": "Restart the currently active debug session."
+        },
+        {
+            "name": "debug_continue",
+            "displayName": "Continue",
+            "description": "Resume execution after hitting a breakpoint."
+        },
+        {
+            "name": "debug_pause",
+            "displayName": "Pause",
+            "description": "Pause a running program."
+        },
+        {
+            "name": "debug_step_over",
+            "displayName": "Step Over",
+            "description": "Execute the next line, stepping over function calls."
+        },
+        {
+            "name": "debug_step_into",
+            "displayName": "Step Into",
+            "description": "Step into the next function call."
+        },
+        {
+            "name": "debug_step_out",
+            "displayName": "Step Out",
+            "description": "Step out of the current function."
+        },
+        {
+            "name": "debug_evaluate",
+            "displayName": "Evaluate Expression",
+            "description": "Evaluate an expression at the current breakpoint.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Expression to evaluate"
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame ID (default: top frame)"
+                    }
+                },
+                "required": [
+                    "expression"
+                ]
+            }
+        },
+        {
+            "name": "debug_get_variables",
+            "displayName": "Get Variables",
+            "description": "Get all variables in the current scope when stopped at a breakpoint.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "variablesReference": {
+                        "type": "number",
+                        "description": "Expand a specific variable reference"
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": "Filter variables by name (case-insensitive)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "debug_get_stack_trace",
+            "displayName": "Get Stack Trace",
+            "description": "Get the call stack when stopped at a breakpoint."
+        },
+        {
+            "name": "debug_get_launch_configs",
+            "displayName": "Get Launch Configs",
+            "description": "List all debug launch configurations from the workspace."
+        },
+        {
+            "name": "debug_inspect",
+            "displayName": "Deep Inspect Variable",
+            "description": "Recursively expand a variable's nested data structures.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "variable": {
+                        "type": "string",
+                        "description": "Variable or expression to inspect"
+                    },
+                    "depth": {
+                        "type": "number",
+                        "description": "Max expansion depth (1-5, default: 2)"
+                    },
+                    "maxItems": {
+                        "type": "number",
+                        "description": "Max items per level (default: 50, max: 200)"
+                    }
+                },
+                "required": [
+                    "variable"
+                ]
+            }
+        },
+        {
+            "name": "debug_watch",
+            "displayName": "Watch Expressions",
+            "description": "Manage persistent watch expressions across step operations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "add",
+                            "remove",
+                            "list",
+                            "clear"
+                        ],
+                        "description": "Operation to perform"
+                    },
+                    "expressions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Expressions to add/remove"
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "editor_open_file",
+            "displayName": "Open File",
+            "description": "Open a file in the editor, optionally at a specific line.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "Absolute file path"
+                    },
+                    "line": {
+                        "type": "number",
+                        "description": "Line number to scroll to (1-based)"
+                    }
+                },
+                "required": [
+                    "file"
+                ]
+            }
+        },
+        {
+            "name": "editor_get_open_files",
+            "displayName": "Get Open Files",
+            "description": "List all files currently open in editor tabs."
+        },
+        {
+            "name": "workspace_find_file",
+            "displayName": "Find Files",
+            "description": "Find files in the workspace by glob pattern.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern (e.g. '**/*.php', '**/checkout*.ts')"
+                    },
+                    "maxResults": {
+                        "type": "number",
+                        "description": "Maximum results (default: 20)"
+                    }
+                },
+                "required": [
+                    "pattern"
+                ]
+            }
+        },
+        {
+            "name": "workspace_get_diagnostics",
+            "displayName": "Get Diagnostics",
+            "description": "Get errors and warnings from all language services.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "Filter to specific file (absolute path)"
+                    },
+                    "severity": {
+                        "type": "string",
+                        "description": "Filter by severity: error, warning"
+                    }
+                }
+            }
+        }
+    ]
+}

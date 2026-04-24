@@ -1,0 +1,12 @@
+.vscode-test/
+src/
+**/*.ts
+!out/**
+*.vsix
+.vscode/
+tsconfig.json
+.eslintrc.json
+.gitignore
+node_modules/.bin/
+package-lock.json
+ext.sh

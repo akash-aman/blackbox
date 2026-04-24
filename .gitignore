@@ -134,6 +134,25 @@ dist
 !.yarn/sdks
 !.yarn/versions
 
+# ── Blackbox-specific ────────────────────────────
+# Packaged VS Code extensions
+*.vsix
+
+# Local dev script (contains absolute paths)
+editors/vscode/ext.sh
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# JetBrains IDE
+.idea/
+
+# Compiled output (monorepo-wide)
+editors/vscode/out/
+
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+ext.sh

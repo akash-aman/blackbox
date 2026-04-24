@@ -1,0 +1,263 @@
+{
+    "name": "blackbox",
+    "displayName": "Blackbox",
+    "description": "AI-driven debugging — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via MCP tools.",
+    "version": "0.1.0",
+    "publisher": "akash-cx",
+    "license": "MIT",
+    "pricing": "Free",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/akash-aman/blackbox"
+    },
+    "engines": {
+        "vscode": "^1.99.0"
+    },
+    "categories": [
+        "Debuggers",
+        "Other"
+    ],
+    "keywords": [
+        "debugger",
+        "breakpoint",
+        "mcp",
+        "ai",
+        "debug",
+        "dap",
+        "blackbox"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "languageModelTools": [
+            {
+                "name": "debug_set_breakpoint",
+                "displayName": "Set Breakpoint",
+                "modelDescription": "Set a breakpoint at a specific file and line number. Supports conditions and log messages. Use when the user wants to debug code at a specific location.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "Absolute file path"
+                        },
+                        "line": {
+                            "type": "number",
+                            "description": "Line number (1-based)"
+                        },
+                        "condition": {
+                            "type": "string",
+                            "description": "Optional condition expression"
+                        },
+                        "logMessage": {
+                            "type": "string",
+                            "description": "Optional log message (logpoint)"
+                        }
+                    },
+                    "required": [
+                        "file",
+                        "line"
+                    ]
+                }
+            },
+            {
+                "name": "debug_remove_breakpoint",
+                "displayName": "Remove Breakpoint",
+                "modelDescription": "Remove a breakpoint at a specific file and line number.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "Absolute file path"
+                        },
+                        "line": {
+                            "type": "number",
+                            "description": "Line number (1-based)"
+                        }
+                    },
+                    "required": [
+                        "file",
+                        "line"
+                    ]
+                }
+            },
+            {
+                "name": "debug_list_breakpoints",
+                "displayName": "List Breakpoints",
+                "modelDescription": "List all currently set breakpoints with file, line, and condition."
+            },
+            {
+                "name": "debug_start",
+                "displayName": "Start Debug Session",
+                "modelDescription": "Start a debug session for any language. Pass debug configuration properties like type (php/node/python/go), request (launch/attach), port, program path. Works with any VS Code debug adapter.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "description": "Debug adapter type (e.g. php, node, python, go, cppdbg)"
+                        },
+                        "request": {
+                            "type": "string",
+                            "description": "launch or attach"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Session display name"
+                        },
+                        "port": {
+                            "type": "number",
+                            "description": "Debug port (e.g. 9003 for Xdebug)"
+                        },
+                        "program": {
+                            "type": "string",
+                            "description": "Program to debug (for launch)"
+                        },
+                        "pathMappings": {
+                            "type": "object",
+                            "description": "Remote to local path mappings"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "debug_stop",
+                "displayName": "Stop Debug Session",
+                "modelDescription": "Stop the currently active debug session."
+            },
+            {
+                "name": "debug_evaluate",
+                "displayName": "Evaluate Expression",
+                "modelDescription": "Evaluate an expression in the current debug session when stopped at a breakpoint. Use to inspect any variable value, call functions, or check expression results. Returns the result, type, and expandable reference.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "Expression to evaluate (e.g. '$cart->get_total()', 'myVar', 'len(items)')"
+                        },
+                        "frameId": {
+                            "type": "number",
+                            "description": "Stack frame ID (default: top frame)"
+                        }
+                    },
+                    "required": [
+                        "expression"
+                    ]
+                }
+            },
+            {
+                "name": "debug_get_variables",
+                "displayName": "Get Variables",
+                "modelDescription": "Get all variables in the current scope when stopped at a breakpoint. Returns variable names, values, and types. Can filter by name and expand nested objects/arrays.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "variablesReference": {
+                            "type": "number",
+                            "description": "Expand a specific variable (from previous get_variables result)"
+                        },
+                        "filter": {
+                            "type": "string",
+                            "description": "Filter variables by name (case-insensitive substring match)"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "debug_get_stack_trace",
+                "displayName": "Get Stack Trace",
+                "modelDescription": "Get the call stack when stopped at a breakpoint. Shows file path, line number, and function name for each frame in the call chain."
+            },
+            {
+                "name": "editor_open_file",
+                "displayName": "Open File",
+                "modelDescription": "Open a file in the VS Code editor, optionally scrolling to a specific line number.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "Absolute file path"
+                        },
+                        "line": {
+                            "type": "number",
+                            "description": "Line number to scroll to (1-based)"
+                        }
+                    },
+                    "required": [
+                        "file"
+                    ]
+                }
+            },
+            {
+                "name": "editor_get_open_files",
+                "displayName": "Get Open Files",
+                "modelDescription": "List all files currently open in editor tabs with their active and dirty status."
+            },
+            {
+                "name": "workspace_find_file",
+                "displayName": "Find Files",
+                "modelDescription": "Find files in the workspace by glob pattern. Use to locate source files, configs, or any file by name pattern.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern (e.g. '**/*.php', '**/checkout*.ts')"
+                        },
+                        "maxResults": {
+                            "type": "number",
+                            "description": "Maximum results (default: 20)"
+                        }
+                    },
+                    "required": [
+                        "pattern"
+                    ]
+                }
+            },
+            {
+                "name": "workspace_get_diagnostics",
+                "displayName": "Get Diagnostics",
+                "modelDescription": "Get errors and warnings from all language services (TypeScript, PHP, ESLint, etc.). Can filter by file and severity.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "Filter to specific file (absolute path)"
+                        },
+                        "severity": {
+                            "type": "string",
+                            "description": "Filter by severity: error, warning"
+                        }
+                    }
+                }
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@types/glob": "^8.1.0",
+        "@types/mocha": "^10.0.0",
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.99.0",
+        "@vscode/test-electron": "^2.4.0",
+        "eslint": "^9.0.0",
+        "mocha": "^10.0.0",
+        "typescript": "^5.5.0"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "zod": "^4.3.6"
+    }
+}
