@@ -1,7 +1,10 @@
+<div align="center">
+
 # ⬛ Blackbox
 
 **AI-driven debugging for any language — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via [MCP](https://modelcontextprotocol.io/) tools.**
 
+</div>
 
 <p align="center">
 <a href="https://www.patreon.com/akashaman">
@@ -27,7 +30,7 @@ Made with ❤️ by [Akash Aman](https://linktr.ee/akash_aman)
 
 ![Blackbox](./assets/og-image.png)
 
-## ✨ Key Features (Tool Contract)
+## ✨ Key Features
 
 All IDE implementations expose the same consistent set of tools defined in [`schema/tools.json`](schema/tools.json):
 
