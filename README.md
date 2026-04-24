@@ -65,7 +65,7 @@ This repository contains the following packages:
 
 The core debugging engine that powers Blackbox. It provides framework-agnostic MCP tool implementations for breakpoint management, debug session control, variable inspection, and code navigation. You can use this package to integrate Blackbox debugging with any IDE (VS Code, JetBrains, Neovim, etc.) or with custom editor implementations.
 
-➡️ **[View the detailed `akash-cx.blackbox-debug` README](./packages/blackbox-debug/README.md)**
+➡️ **[View the detailed `akash-cx.blackbox-debug` README](./editors/vscode/README.md)**
 
 ## 🤝 Contributing
 
