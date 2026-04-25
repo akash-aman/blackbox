@@ -1,0 +1,52 @@
+<idea-plugin>
+    <id>cx.akash.blackbox</id>
+    <name>Blackbox</name>
+    <vendor email="sir.akashaman@gmail.com" url="https://blackbox.xcode.cx/">Akash Aman</vendor>
+
+    <description><![CDATA[
+        <h2>Blackbox — AI-driven debugging</h2>
+        <p>
+            Set breakpoints, drive debug sessions, inspect variables, and navigate code
+            from any MCP-compatible AI client — Cursor, Claude Desktop, JetBrains AI
+            Assistant, custom CLIs.
+        </p>
+        <p>
+            Tool contract is shared with the Blackbox VS Code and Neovim ports
+            (see <a href="https://github.com/akash-aman/blackbox">github.com/akash-aman/blackbox</a>).
+        </p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>0.1.0</h3>
+        <ul>
+            <li>Initial release. Full tool contract from <code>schema/tools.json</code>.</li>
+            <li>Per-project Unix-socket IPC bridge consumed by the bundled Node.js MCP server.</li>
+        </ul>
+    ]]></change-notes>
+
+    <!-- Required IDE module. com.intellij.modules.platform pulls in XDebugger,
+         FileEditorManager, etc. -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <!--
+        Deeper integration with the third-party JetBrains MCP Server plugin
+        (com.intellij.mcpServer) is a planned follow-up — see
+        docs/implementation-plan.md §3.3. For now, JetBrains AI Assistant users
+        configure Blackbox the same way as Cursor / Claude Desktop: point an MCP
+        client at the bundled mcp-bridge Node.js script with BLACKBOX_SOCKET set
+        to the per-project socket path.
+    -->
+
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="cx.akash.blackbox.BlackboxStartup"/>
+        <projectService serviceImplementation="cx.akash.blackbox.ipc.IpcServer"/>
+        <notificationGroup id="Blackbox"
+                           displayType="BALLOON"
+                           key="notification.group.blackbox"/>
+    </extensions>
+
+    <applicationListeners>
+        <listener class="cx.akash.blackbox.BlackboxAppListener"
+                  topic="com.intellij.openapi.project.ProjectManagerListener"/>
+    </applicationListeners>
+</idea-plugin>

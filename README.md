@@ -55,9 +55,11 @@ This project contains implementations for the following editors:
 
 | IDE | Status | Directory |
 |-----|--------|-----------|
-| **VS Code** | Active | [`editors/vscode/`](editors/vscode/) |
-| **JetBrains** | Planned | [`editors/jetbrains/`](editors/jetbrains/) |
-| **Neovim** | Planned | [`editors/neovim/`](editors/neovim/) |
+| **VS Code** | Released | [`editors/vscode/`](editors/vscode/) |
+| **JetBrains** | Scaffolded | [`editors/jetbrains/`](editors/jetbrains/) |
+| **Neovim** | Scaffolded | [`editors/neovim/`](editors/neovim/) |
+
+A single MCP stdio bridge ([`editors/_shared/mcp-bridge/`](editors/_shared/mcp-bridge/)) backs every port — read [`docs/implementation-plan.md`](docs/implementation-plan.md) for the architecture overview and per-IDE plan.
 
 
 ## 📚 Packages in this Monorepo

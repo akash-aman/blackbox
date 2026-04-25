@@ -1,0 +1,61 @@
+*blackbox.txt*  AI-driven debugging for Neovim via the Model Context Protocol
+
+==============================================================================
+INTRODUCTION                                                  *blackbox-intro*
+
+Blackbox exposes Neovim's debugger (via |nvim-dap|), buffers, and diagnostics
+as MCP tools that any AI client (Cursor, Claude Desktop, JetBrains AI
+Assistant, etc.) can drive over a Unix-domain socket.
+
+Tool contract is shared with the VS Code and JetBrains ports — every tool
+defined in `schema/tools.json` is implemented here.
+
+==============================================================================
+SETUP                                                          *blackbox-setup*
+
+Lazy.nvim: >lua
+
+    {
+      'akash-aman/blackbox',
+      dependencies = { 'mfussenegger/nvim-dap' },
+      config = function()
+        require('blackbox').setup({
+          socket = '/tmp/blackbox-nvim.sock',
+        })
+      end,
+    }
+<
+
+Then point an MCP client at the bundled bridge:
+>
+    BLACKBOX_SOCKET=/tmp/blackbox-nvim.sock \
+      node ~/.local/share/nvim/.../blackbox/editors/_shared/mcp-bridge/src/server.js
+<
+
+==============================================================================
+COMMANDS                                                     *blackbox-commands*
+
+:BlackboxStatus          Print IPC socket path, running state, tool list,
+                         nvim-dap availability.
+
+:BlackboxToolCall {tool} {jsonArgs}
+                         Manually invoke a Blackbox tool. Useful for
+                         debugging the bridge.
+
+==============================================================================
+LUA API                                                          *blackbox-api*
+
+require('blackbox').setup(opts)        Start the IPC server.
+require('blackbox').call(tool, args)   Invoke a tool synchronously.
+require('blackbox').status()           Inspect server state.
+require('blackbox').shutdown()         Stop the IPC server, unlink socket.
+
+==============================================================================
+TESTING                                                       *blackbox-testing*
+
+>
+    nvim --headless --noplugin -u tests/minimal_init.lua \
+      -c "PlenaryBustedDirectory tests/"
+<
+
+ vim:tw=78:ts=8:noet:ft=help:norl:

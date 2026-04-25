@@ -1,0 +1,21 @@
+{
+    "name": "@blackbox/mcp-bridge",
+    "version": "0.1.0",
+    "description": "Shared stdio MCP server for the Blackbox multi-IDE debugger. Forwards every tool defined in schema/tools.json over a Unix-domain socket to whichever editor host (VS Code / JetBrains / Neovim) is listening on $BLACKBOX_SOCKET.",
+    "license": "MIT",
+    "type": "commonjs",
+    "main": "src/server.js",
+    "bin": {
+        "blackbox-mcp": "src/server.js"
+    },
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "start": "node src/server.js"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "zod": "^4.3.6"
+    }
+}

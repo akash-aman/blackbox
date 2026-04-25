@@ -156,3 +156,8 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 ext.sh
+
+blackbox-site.code-workspace
+
+# Neovim test dependencies
+editors/neovim/tests/.deps

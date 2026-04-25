@@ -1,0 +1,10 @@
+# Build / IDE
+.gradle/
+build/
+out/
+.idea/
+*.iml
+local.properties
+
+# Bundled MCP bridge install
+mcp-bridge/node_modules/
