@@ -2,7 +2,7 @@
     "name": "blackbox-debug",
     "displayName": "Blackbox",
     "description": "AI-driven debugging — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via MCP tools.",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "publisher": "akash-cx",
     "license": "MIT",
     "icon": "assets/logo-128.png",
