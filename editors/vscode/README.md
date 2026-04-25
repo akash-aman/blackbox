@@ -71,7 +71,22 @@ Blackbox exposes debugging tools to AI models through two transport paths:
       "type": "stdio",
       "command": "node",
       "args": [
-        "/Users/<user>/.vscode/extensions/akash-cx.blackbox-debug-0.1.0/out/mcp/server.js"
+        "/Users/<user>/.vscode/extensions/akash-cx.blackbox-debug-<version>/out/mcp/server.js"
+      ]
+    }
+  }
+}
+```
+
+- Example: if the user is on MacOS is akashaman and version of blackbox is 0.1.0 then the path will be: 
+```json
+{
+  "servers": {
+    "blackbox": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/akashaman/.vscode/extensions/akash-cx.blackbox-debug-0.1.0/out/mcp/server.js"
       ]
     }
   }
