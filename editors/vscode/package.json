@@ -5,6 +5,7 @@
     "version": "0.1.0",
     "publisher": "akash-cx",
     "license": "MIT",
+    "icon": "assets/logo-128.png",
     "pricing": "Free",
     "repository": {
         "type": "git",
