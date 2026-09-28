@@ -32,7 +32,7 @@ The VS Code architecture is designed for **convergence**. It allows both interna
 
 ### Technical Workflow
 1.  **Native Path (`languageModelTools`):** VS Code's internal chat (e.g., Copilot) accesses tools via thin wrappers in `tools/*.ts`.
-2.  **External Path (MCP Server):** External clients (Cursor, Claude Desktop) connect to `mcp/server.ts` via stdio. This server communicates with the Extension Host through a **Unix Socket** (newline-delimited JSON).
+2.  **External Path (MCP Server):** External clients (Cursor, Claude Desktop) connect to `mcp/server.ts` via stdio. This server communicates with the Extension Host through a **Unix Socket** (newline-delimited JSON). Each VS Code window listens on its own socket, `/tmp/blackbox/<pid>.sock`, and writes `/tmp/blackbox/<pid>.json` listing its workspace folders. On every tool call the MCP server picks the window whose folder contains its working directory, falling back to the most recently focused window.
 3.  **Unified Implementation:** Both paths resolve to `tools/impl/*`, ensuring that a `debug_step_over` command behaves identically regardless of the trigger source.
 
 ### Communication Flow

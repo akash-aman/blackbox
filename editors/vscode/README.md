@@ -93,6 +93,13 @@ Blackbox exposes debugging tools to AI models through two transport paths:
 }
 ```
 
+### Multiple VS Code windows
+
+Each window runs its own Blackbox bridge. Tool calls go to the window whose workspace folder contains the MCP client's working directory, otherwise to the window you focused last. To override this, set one of these in the server's `env`:
+
+* `BLACKBOX_WORKSPACE`: a folder to match instead of the working directory.
+* `BLACKBOX_SOCKET`: a socket path to always use, e.g. `/tmp/blackbox/<pid>.sock`.
+
 ## 📋 Requirements
 
 * **VS Code** 1.99.0 or later.

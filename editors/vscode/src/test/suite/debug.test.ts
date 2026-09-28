@@ -1,15 +1,23 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import { listWindows } from '../../ipc/registry';
 
 suite('Debug Tools', () => {
 
     test('extension should activate', async () => {
-        const ext = vscode.extensions.getExtension('akash-aman.wpx-debug');
+        const ext = vscode.extensions.getExtension('akash-cx.blackbox-debug');
         assert.ok(ext, 'Extension not found');
         if (!ext!.isActive) {
             await ext!.activate();
         }
         assert.ok(ext!.isActive, 'Extension failed to activate');
+    });
+
+    test('extension should register this window for the MCP bridge', () => {
+        const self = listWindows().find(w => w.pid === process.pid);
+        assert.ok(self, 'No registry entry for this extension host');
+        assert.ok(fs.existsSync(self!.socket), 'Socket file missing');
     });
 
     test('breakpoints API should be available', () => {
