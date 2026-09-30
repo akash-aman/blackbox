@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { listWindows } from '../../ipc/registry';
 import { callExtension } from '../../ipc/client';
 import { STATUS_TOOL, WindowStatus } from '../../ipc/protocol';
+import { TOOLS } from '../../tools/catalog';
 
 suite('Debug Tools', () => {
 
@@ -40,6 +41,13 @@ suite('Debug Tools', () => {
         } finally {
             vscode.debug.removeBreakpoints([bp]);
         }
+    });
+
+    test('every declared chat tool is registered with VS Code and served by the bridge', () => {
+        const declared: string[] = vscode.extensions.getExtension('akash-cx.blackbox-debug')!.packageJSON.contributes.languageModelTools.map((t: { name: string }) => t.name);
+        const registered = new Set(vscode.lm.tools.map(t => t.name));
+        assert.deepStrictEqual(declared.filter(name => !registered.has(name)), [], 'declared but not registered');
+        assert.deepStrictEqual(Object.keys(TOOLS).sort(), [...declared].sort());
     });
 
     test('breakpoints API should be available', () => {

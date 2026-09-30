@@ -75,6 +75,14 @@ async function topFrameId(session: vscode.DebugSession, threadId: number): Promi
     return frame.id;
 }
 
+interface FrameTarget { threadId?: number; frameId?: number }
+
+// The frame to inspect: the one asked for, else the top of the chosen thread.
+async function frameIdFor(session: vscode.DebugSession, target: FrameTarget = {}): Promise<number> {
+    if (target.frameId !== undefined) { return target.frameId; }
+    return topFrameId(session, await resolveThread(session, target.threadId));
+}
+
 async function describeStop(session: vscode.DebugSession, stop: StopEvent): Promise<Record<string, unknown>> {
     const threadId = stop.threadId ?? await resolveThread(session);
     let frames: Frame[] = [];
@@ -164,17 +172,54 @@ const watchExpressions: Set<string> = new Set();
 
 // ── Tool Implementations ────────────────────────────────────────
 
-export async function setBreakpoint(args: {
-    file?: string; line?: number; condition?: string; logMessage?: string;
-    breakpoints?: { file: string; line: number; condition?: string; logMessage?: string }[];
-}): Promise<string> {
-    interface BpSpec { file: string; line: number; condition?: string; logMessage?: string }
-    let specs: BpSpec[];
-    if (Array.isArray(args.breakpoints)) {
-        specs = args.breakpoints;
-    } else {
-        specs = [{ file: args.file!, line: args.line!, condition: args.condition, logMessage: args.logMessage }];
+interface BpSpec { file: string; line: number; condition?: string; hitCondition?: string; logMessage?: string }
+interface BpLoc { file: string; line: number }
+
+function describeSpec(spec: BpSpec): string {
+    return spec.file + ':' + spec.line
+        + (spec.condition ? ' (if: ' + spec.condition + ')' : '')
+        + (spec.hitCondition ? ' (hits: ' + spec.hitCondition + ')' : '')
+        + (spec.logMessage ? ' (log: ' + spec.logMessage + ')' : '');
+}
+
+function sourceBreakpointsAt(loc: BpLoc): vscode.SourceBreakpoint[] {
+    return vscode.debug.breakpoints.filter((bp): bp is vscode.SourceBreakpoint =>
+        bp instanceof vscode.SourceBreakpoint &&
+        bp.location.uri.fsPath === loc.file &&
+        bp.location.range.start.line === loc.line - 1);
+}
+
+function functionBreakpointsNamed(name: string): vscode.FunctionBreakpoint[] {
+    return vscode.debug.breakpoints.filter((bp): bp is vscode.FunctionBreakpoint =>
+        bp instanceof vscode.FunctionBreakpoint && bp.functionName === name);
+}
+
+// Breakpoint properties are read-only in VS Code, so changing one means
+// replacing it with a copy.
+function withEnabled(bp: vscode.Breakpoint, enabled: boolean): vscode.Breakpoint {
+    if (bp instanceof vscode.SourceBreakpoint) {
+        return new vscode.SourceBreakpoint(bp.location, enabled, bp.condition, bp.hitCondition, bp.logMessage);
     }
+    if (bp instanceof vscode.FunctionBreakpoint) {
+        return new vscode.FunctionBreakpoint(bp.functionName, enabled, bp.condition, bp.hitCondition, bp.logMessage);
+    }
+    throw new Error('only source and function breakpoints can be enabled or disabled');
+}
+
+// A note when the active debug adapter says it can't honour a feature.
+function unsupportedNote(capability: string, feature: string): string {
+    const session = findSession();
+    if (!session || !events) { return ''; }
+    const caps = events.capabilities(session.id);
+    return Object.keys(caps).length > 0 && !caps[capability]
+        ? `\nnote: the "${session.type}" debug adapter does not support ${feature}; it may be ignored`
+        : '';
+}
+
+export async function setBreakpoint(args: BpSpec & { breakpoints?: BpSpec[] }): Promise<string> {
+    const specs: BpSpec[] = Array.isArray(args.breakpoints)
+        ? args.breakpoints
+        : [{ file: args.file, line: args.line, condition: args.condition, hitCondition: args.hitCondition, logMessage: args.logMessage }];
     const results: string[] = [];
     const bps: vscode.SourceBreakpoint[] = [];
     for (const spec of specs) {
@@ -182,43 +227,64 @@ export async function setBreakpoint(args: {
             results.push('skip: invalid — file and line (>= 1) required');
             continue;
         }
-        const uri = vscode.Uri.file(spec.file);
-        const pos = new vscode.Position(spec.line - 1, 0);
-        bps.push(new vscode.SourceBreakpoint(new vscode.Location(uri, pos), true, spec.condition, undefined, spec.logMessage));
-        results.push('ok: ' + spec.file + ':' + spec.line + (spec.condition ? ' (if: ' + spec.condition + ')' : '') + (spec.logMessage ? ' (log: ' + spec.logMessage + ')' : ''));
+        const location = new vscode.Location(vscode.Uri.file(spec.file), new vscode.Position(spec.line - 1, 0));
+        bps.push(new vscode.SourceBreakpoint(location, true, spec.condition, spec.hitCondition, spec.logMessage));
+        results.push('ok: ' + describeSpec(spec));
     }
     if (bps.length > 0) { await changeBreakpoints(() => vscode.debug.addBreakpoints(bps)); }
-    return results.join('\n');
+    const note = specs.some(s => s.hitCondition) ? unsupportedNote('supportsHitConditionalBreakpoints', 'hit conditions') : '';
+    return results.join('\n') + note;
 }
 
-export async function removeBreakpoint(args: {
-    file?: string; line?: number;
-    breakpoints?: { file: string; line: number }[];
-}): Promise<string> {
-    interface BpLoc { file: string; line: number }
-    let specs: BpLoc[];
-    if (Array.isArray(args.breakpoints)) {
-        specs = args.breakpoints;
-    } else {
-        specs = [{ file: args.file!, line: args.line! }];
-    }
+export async function setFunctionBreakpoint(args: { name: string; condition?: string; hitCondition?: string; logMessage?: string }): Promise<string> {
+    if (!args.name) { throw new Error('function name is required'); }
+    const bp = new vscode.FunctionBreakpoint(args.name, true, args.condition, args.hitCondition, args.logMessage);
+    await changeBreakpoints(() => vscode.debug.addBreakpoints([bp]));
+    return 'ok: function ' + args.name
+        + (args.condition ? ' (if: ' + args.condition + ')' : '')
+        + (args.hitCondition ? ' (hits: ' + args.hitCondition + ')' : '')
+        + unsupportedNote('supportsFunctionBreakpoints', 'function breakpoints');
+}
+
+export async function removeBreakpoint(args: BpLoc & { breakpoints?: BpLoc[]; functions?: string[] }): Promise<string> {
+    const specs: BpLoc[] = Array.isArray(args.breakpoints)
+        ? args.breakpoints
+        : args.file ? [{ file: args.file, line: args.line }] : [];
     const results: string[] = [];
     const toRemove: vscode.Breakpoint[] = [];
     for (const spec of specs) {
-        const matching = vscode.debug.breakpoints.filter(bp =>
-            bp instanceof vscode.SourceBreakpoint &&
-            bp.location.uri.fsPath === spec.file &&
-            bp.location.range.start.line === spec.line - 1
-        );
-        if (matching.length === 0) {
-            results.push('skip: no breakpoint at ' + spec.file + ':' + spec.line);
-        } else {
-            toRemove.push(...matching);
-            results.push('ok: removed ' + spec.file + ':' + spec.line);
-        }
+        const matching = sourceBreakpointsAt(spec);
+        results.push(matching.length === 0 ? 'skip: no breakpoint at ' + spec.file + ':' + spec.line : 'ok: removed ' + spec.file + ':' + spec.line);
+        toRemove.push(...matching);
+    }
+    for (const name of args.functions ?? []) {
+        const matching = functionBreakpointsNamed(name);
+        results.push(matching.length === 0 ? 'skip: no function breakpoint on ' + name : 'ok: removed function ' + name);
+        toRemove.push(...matching);
     }
     if (toRemove.length > 0) { await changeBreakpoints(() => vscode.debug.removeBreakpoints(toRemove)); }
-    return results.join('\n');
+    return results.join('\n') || 'Nothing to remove: pass file+line, breakpoints or functions';
+}
+
+export async function toggleBreakpoints(args: { enabled: boolean; breakpoints?: BpLoc[]; functions?: string[] }): Promise<string> {
+    if (typeof args.enabled !== 'boolean') { throw new Error('"enabled" (true or false) is required'); }
+    const targets = [
+        ...(args.breakpoints ?? []).flatMap(sourceBreakpointsAt),
+        ...(args.functions ?? []).flatMap(functionBreakpointsNamed),
+    ];
+    const all = !args.breakpoints && !args.functions;
+    const chosen = all ? [...vscode.debug.breakpoints] : targets;
+    const changing = chosen.filter(bp => bp.enabled !== args.enabled);
+    if (changing.length > 0) {
+        const replacements = changing.map(bp => withEnabled(bp, args.enabled));
+        await changeBreakpoints(() => {
+            vscode.debug.removeBreakpoints(changing);
+            vscode.debug.addBreakpoints(replacements);
+        });
+    }
+    return `${args.enabled ? 'Enabled' : 'Disabled'} ${changing.length} breakpoint(s)`
+        + (chosen.length > changing.length ? `; ${chosen.length - changing.length} already ${args.enabled ? 'enabled' : 'disabled'}` : '')
+        + (chosen.length === 0 ? '. No matching breakpoints.' : '');
 }
 
 export async function removeAllBreakpoints(): Promise<string> {
@@ -230,8 +296,12 @@ export async function removeAllBreakpoints(): Promise<string> {
 
 export async function listBreakpoints(): Promise<string> {
     const bps = vscode.debug.breakpoints.map(bp => {
+        const common = { enabled: bp.enabled, condition: bp.condition || undefined, hitCondition: bp.hitCondition || undefined, logMessage: bp.logMessage || undefined };
         if (bp instanceof vscode.SourceBreakpoint) {
-            return { type: 'source', file: bp.location.uri.fsPath, line: bp.location.range.start.line + 1, enabled: bp.enabled, condition: bp.condition || undefined, logMessage: bp.logMessage || undefined };
+            return { type: 'source', file: bp.location.uri.fsPath, line: bp.location.range.start.line + 1, ...common };
+        }
+        if (bp instanceof vscode.FunctionBreakpoint) {
+            return { type: 'function', name: bp.functionName, ...common };
         }
         return { type: 'other', enabled: bp.enabled };
     });
@@ -297,8 +367,8 @@ export async function stepOut(args: { threadId?: number } = {}): Promise<string>
     return resumeAndReport('stepOut', args.threadId, STEP_WAIT_MS);
 }
 
-export async function waitForStop(args: { timeoutMs?: number } = {}): Promise<string> {
-    return describeWait(await eventHub().waitForStop(args.timeoutMs ?? DEFAULT_STOP_WAIT_MS));
+export async function waitForStop(args: { timeoutMs?: number; next?: boolean } = {}): Promise<string> {
+    return describeWait(await eventHub().waitForStop(args.timeoutMs ?? DEFAULT_STOP_WAIT_MS, { next: args.next }));
 }
 
 export async function getOutput(args: OutputQuery = {}): Promise<string> {
@@ -333,20 +403,20 @@ export async function restartDebug(): Promise<string> {
     }
 }
 
-export async function evaluate(args: { expression: string; frameId?: number }): Promise<string> {
+export async function evaluate(args: FrameTarget & { expression: string }): Promise<string> {
     const { expression } = args;
     const session = activeSession();
-    const frameId = args.frameId ?? await topFrameId(session, await resolveThread(session));
+    const frameId = await frameIdFor(session, args);
     const response = await session.customRequest('evaluate', { expression, frameId, context: 'repl' });
     return JSON.stringify({ expression, result: response.result, type: response.type || undefined, variablesReference: response.variablesReference || undefined }, null, 2);
 }
 
-export async function getVariables(args: { variablesReference?: number; filter?: string }): Promise<string> {
+export async function getVariables(args: FrameTarget & { variablesReference?: number; filter?: string }): Promise<string> {
     const { variablesReference, filter } = args;
     const session = activeSession();
 
     if (!variablesReference) {
-        const frameId = await topFrameId(session, await resolveThread(session));
+        const frameId = await frameIdFor(session, args);
         const scopes = await session.customRequest('scopes', { frameId });
         const result: Record<string, unknown[]> = {};
         for (const scope of scopes.scopes || []) {
@@ -368,9 +438,9 @@ export async function getVariables(args: { variablesReference?: number; filter?:
     return JSON.stringify(variables, null, 2);
 }
 
-export async function getStackTrace(): Promise<string> {
+export async function getStackTrace(args: { threadId?: number; levels?: number } = {}): Promise<string> {
     const session = activeSession();
-    const frames = await stackFrames(session, await resolveThread(session), 20);
+    const frames = await stackFrames(session, await resolveThread(session, args.threadId), Math.min(args.levels ?? 20, 200));
     return JSON.stringify(frames, null, 2);
 }
 
@@ -384,13 +454,13 @@ export async function getLaunchConfigs(): Promise<string> {
     return JSON.stringify(configs, null, 2);
 }
 
-export async function inspect(args: { variable: string; depth?: number; maxItems?: number }): Promise<string> {
+export async function inspect(args: FrameTarget & { variable: string; depth?: number; maxItems?: number }): Promise<string> {
     const { variable } = args;
     const maxDepth = Math.min(args.depth || 2, 5);
     const maxItems = Math.min(args.maxItems || 50, 200);
     const session = activeSession();
     if (!variable) { return 'Error: variable expression is required'; }
-    const frameId = await topFrameId(session, await resolveThread(session));
+    const frameId = await frameIdFor(session, args);
 
     try {
         const evalResult = await session.customRequest('evaluate', { expression: variable, frameId, context: 'repl' });
@@ -424,7 +494,7 @@ export async function inspect(args: { variable: string; depth?: number; maxItems
     }
 }
 
-export async function watch(args: { action: string; expressions?: string[] }): Promise<string> {
+export async function watch(args: FrameTarget & { action: string; expressions?: string[] }): Promise<string> {
     const { action, expressions } = args;
 
     switch (action) {
@@ -448,7 +518,7 @@ export async function watch(args: { action: string; expressions?: string[] }): P
             const session = findSession();
             if (!session) { return 'Watch expressions (' + watchExpressions.size + '): ' + [...watchExpressions].join(', ') + '\n(No active debug session — values not available)'; }
 
-            const frameId = await topFrameId(session, await resolveThread(session));
+            const frameId = await frameIdFor(session, args);
             const results: Record<string, unknown> = {};
             for (const expr of watchExpressions) {
                 try {
@@ -468,4 +538,90 @@ export async function watch(args: { action: string; expressions?: string[] }): P
         default:
             return 'Error: action must be add, remove, list, or clear';
     }
+}
+
+export async function listThreads(): Promise<string> {
+    const session = activeSession();
+    const response = await session.customRequest('threads', {});
+    const paused = new Set(events?.pausedThreads(session.id));
+    const threads = (response.threads || []).map((t: { id: number; name: string }) => ({
+        id: t.id, name: t.name, stopped: paused.has(t.id) || undefined,
+    }));
+    return JSON.stringify({ session: session.name, threads }, null, 2);
+}
+
+interface DapVariable { name: string; value: string; type?: string; variablesReference?: number }
+
+// The scope reference holding `name` in the given frame, if any.
+async function scopeContaining(session: vscode.DebugSession, frameId: number, name: string): Promise<number | undefined> {
+    const scopes = await session.customRequest('scopes', { frameId });
+    for (const scope of scopes.scopes || []) {
+        const vars = await session.customRequest('variables', { variablesReference: scope.variablesReference });
+        if ((vars.variables || []).some((v: DapVariable) => v.name === name)) {
+            return scope.variablesReference;
+        }
+    }
+    return undefined;
+}
+
+export async function setVariable(args: FrameTarget & { name: string; value: string; variablesReference?: number }): Promise<string> {
+    const { name, value } = args;
+    if (!name || value === undefined) { throw new Error('"name" and "value" are required'); }
+    const session = activeSession();
+    const caps = eventHub().capabilities(session.id);
+    const frameId = await frameIdFor(session, args);
+
+    if (caps.supportsSetVariable) {
+        const ref = args.variablesReference ?? await scopeContaining(session, frameId, name);
+        if (ref !== undefined) {
+            const result = await session.customRequest('setVariable', { variablesReference: ref, name, value });
+            return JSON.stringify({ name, value: result.value, type: result.type || undefined }, null, 2);
+        }
+    }
+    if (caps.supportsSetExpression) {
+        const result = await session.customRequest('setExpression', { expression: name, value, frameId });
+        return JSON.stringify({ name, value: result.value, type: result.type || undefined }, null, 2);
+    }
+    throw new Error(caps.supportsSetVariable
+        ? `no variable named "${name}" in the current frame; pass variablesReference for a nested one`
+        : `the "${session.type}" debug adapter cannot change variables`);
+}
+
+export async function runToLine(args: { file: string; line: number; timeoutMs?: number; threadId?: number }): Promise<string> {
+    if (!args.file || !args.line || args.line < 1) { throw new Error('file and line (>= 1) are required'); }
+    const session = activeSession();
+    const target = { file: args.file, line: args.line };
+    const existing = sourceBreakpointsAt(target).length > 0;
+    const temporary = new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file(args.file), new vscode.Position(args.line - 1, 0)));
+
+    if (!existing) { await changeBreakpoints(() => vscode.debug.addBreakpoints([temporary])); }
+    try {
+        const wait = eventHub().arm();
+        await session.customRequest('continue', { threadId: await resolveThread(session, args.threadId) });
+        const result = await wait(args.timeoutMs ?? DEFAULT_STOP_WAIT_MS);
+        const report = JSON.parse(await describeWait(result));
+        report.reachedTarget = report.state === 'stopped' && report.line === args.line && report.file === args.file;
+        return JSON.stringify(report, null, 2);
+    } finally {
+        if (!existing) { await changeBreakpoints(() => vscode.debug.removeBreakpoints([temporary])); }
+    }
+}
+
+export async function getSourceContext(args: FrameTarget & { lines?: number } = {}): Promise<string> {
+    const session = activeSession();
+    const radius = Math.min(Math.max(args.lines ?? 5, 0), 50);
+    const threadId = await resolveThread(session, args.threadId);
+    const frames = await stackFrames(session, threadId, 200);
+    const frame = args.frameId !== undefined ? frames.find(f => f.id === args.frameId) : frames[0];
+    if (!frame) { throw new Error('no such stack frame — is the debugger stopped at a breakpoint?'); }
+
+    // Through VS Code, so unsaved edits are included.
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(frame.file));
+    const first = Math.max(1, frame.line - radius);
+    const last = Math.min(doc.lineCount, frame.line + radius);
+    const lines = [];
+    for (let n = first; n <= last; n++) {
+        lines.push({ line: n, text: doc.lineAt(n - 1).text, current: n === frame.line || undefined });
+    }
+    return JSON.stringify({ file: frame.file, line: frame.line, function: frame.name, lines }, null, 2);
 }

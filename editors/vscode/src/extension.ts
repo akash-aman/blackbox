@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { registerAllTools } from './tools';
+import { registerChatTools } from './tools/chat';
 import { IPCServer } from './ipc/server';
 import { registerIPCHandlers } from './ipc/handlers';
 import { workspaceFolderPaths, setEventHub } from './tools/impl';
@@ -12,7 +12,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(events);
 
     // Register languageModelTools for # references in chat.
-    registerAllTools(context);
+    registerChatTools(context);
 
     // Start this window's IPC server for the MCP stdio bridge.
     const ipc = new IPCServer({

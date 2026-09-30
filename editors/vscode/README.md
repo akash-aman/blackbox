@@ -35,21 +35,29 @@ Made with ❤️ by [Akash Aman](https://linktr.ee/akash_aman)
 ## ✨ Features
 
 ### 🛑 Breakpoint Management
-* Set, remove, and list breakpoints with conditions and log messages.
+* Set, remove, and list breakpoints with conditions, hit counts and log messages.
+* Function breakpoints by name, no file or line needed.
+* Enable and disable breakpoints without removing them.
 * Batch operations for multiple breakpoints at once.
 
 ### 🐞 Debug Session Control
 * Start debug sessions by launch configuration name, or from a type and request; stop and restart them.
 * Wait for the debugger to pause (`debug_wait_for_stop`), and step over, into and out with the new location reported.
+* Run to a line (`debug_run_to_line`) with a temporary breakpoint that is always cleaned up.
+* Choose the thread (e.g. one of several concurrent PHP requests) with `debug_list_threads` and `threadId`.
 * Pause on exceptions (`debug_set_exception_breakpoints`).
 * Read program output and logpoint messages (`debug_get_output`).
 * Language-agnostic — works with any VS Code debug adapter.
 
 ### 🔍 Variable Inspection
-* Get all variables in the current scope.
+* Get all variables in the current scope, or in any stack frame (`frameId`).
 * Deep inspect nested objects and arrays.
 * Evaluate arbitrary expressions at breakpoints.
+* Change variables while paused (`debug_set_variable`).
+* See the source around the current line (`debug_get_source_context`).
 * Persistent watch expressions across steps.
+
+All tools are also available to VS Code's own chat (e.g. Copilot) as `#` tools, except the window-selection ones.
 
 ### 📁 Editor & Workspace
 * Open files at specific lines.

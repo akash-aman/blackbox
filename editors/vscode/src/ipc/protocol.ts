@@ -83,10 +83,6 @@ export function ipcDir(): string {
     return `/tmp/blackbox-${os.userInfo().uid}`;
 }
 
-// Shared directory used by 0.1.3-0.2.0. Still read so windows that have not
-// updated stay visible; remove in 0.4.0.
-export const LEGACY_IPC_DIR = '/tmp/blackbox';
-
 // Throws unless dir is a real directory owned by this user and closed to
 // everyone else, so no other user can plant registry entries or sockets.
 export function assertPrivateDir(dir: string): void {

@@ -1,5 +1,6 @@
 .vscode-test/
 test-fixtures/
+scripts/
 src/
 **/*.ts
 !out/**

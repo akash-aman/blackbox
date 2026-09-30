@@ -44,14 +44,22 @@ export interface TrackerHandlers {
     onExit(): void;
 }
 
+interface PendingRequest { readonly command: string; readonly threadId?: number }
+interface Pause { readonly stop: StopEvent; readonly order: number } // Order across all sessions.
+
 interface Tracked<S> {
     readonly session: S;
-    readonly pendingRequests: Map<number, string>; // Request seq -> command.
+    readonly pendingRequests: Map<number, PendingRequest>; // By request seq.
+    // Threads paused right now. Some adapters (Xdebug) pause each thread
+    // (request) independently, so a session can have several.
+    readonly paused: Map<number, Pause>;
     capabilities: Record<string, unknown>;
     lastStop?: StopEvent;
-    stoppedAt: number; // Ordering of stops across sessions; 0 = running.
     ended: boolean;
 }
+
+// Key for a stopped event that names no thread.
+const NO_THREAD = -1;
 
 type Listener<S> = (result: WaitResult<S>) => void;
 type ResponseListener = (command: string) => void;
@@ -76,7 +84,7 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
     constructor(private readonly maxOutput = 1000) {}
 
     track(session: S): TrackerHandlers {
-        const tracked: Tracked<S> = { session, pendingRequests: new Map(), capabilities: {}, stoppedAt: 0, ended: false };
+        const tracked: Tracked<S> = { session, pendingRequests: new Map(), paused: new Map(), capabilities: {}, ended: false };
         this.sessions.set(session.id, tracked);
         return {
             onDidSendMessage: message => this.onAdapterMessage(tracked, message),
@@ -84,9 +92,10 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
                 if (message?.type !== 'request') {
                     return;
                 }
-                tracked.pendingRequests.set(message.seq, message.command);
+                const threadId: number | undefined = message.arguments?.threadId;
+                tracked.pendingRequests.set(message.seq, { command: message.command, threadId });
                 if (RESUMING_REQUESTS.has(message.command)) {
-                    tracked.stoppedAt = 0;
+                    this.resume(tracked, threadId);
                 }
             },
             onWillStopSession: () => this.end(tracked),
@@ -98,20 +107,31 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         return this.sessions.get(sessionId)?.capabilities ?? {};
     }
 
+    // The most recent pause still in effect in this session, else the last one seen.
     lastStop(sessionId: string): StopEvent | undefined {
-        return this.sessions.get(sessionId)?.lastStop;
+        const tracked = this.sessions.get(sessionId);
+        return tracked && (latestPause(tracked)?.stop ?? tracked.lastStop);
     }
 
     isPaused(sessionId: string): boolean {
         const tracked = this.sessions.get(sessionId);
-        return !!tracked && !tracked.ended && tracked.stoppedAt > 0;
+        return !!tracked && !tracked.ended && tracked.paused.size > 0;
     }
 
-    // The most recent pause among sessions that are still paused.
+    pausedThreads(sessionId: string): number[] {
+        return [...(this.sessions.get(sessionId)?.paused.keys() ?? [])].filter(id => id !== NO_THREAD);
+    }
+
+    // The most recent pause still in effect, across sessions.
     currentStop(): { session: S; stop: StopEvent } | undefined {
-        const paused = [...this.sessions.values()].filter(t => !t.ended && t.stoppedAt > 0 && t.lastStop);
-        const latest = paused.sort((a, b) => b.stoppedAt - a.stoppedAt)[0];
-        return latest && { session: latest.session, stop: latest.lastStop! };
+        let latest: { session: S; pause: Pause } | undefined;
+        for (const tracked of this.sessions.values()) {
+            const pause = latestPause(tracked);
+            if (pause && (!latest || pause.order > latest.pause.order)) {
+                latest = { session: tracked.session, pause };
+            }
+        }
+        return latest && { session: latest.session, stop: latest.pause.stop };
     }
 
     // Starts listening now, before a request is sent, so a fast pause is not
@@ -182,8 +202,10 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         });
     }
 
-    waitForStop(timeoutMs: number): Promise<WaitResult<S>> {
-        const current = this.currentStop();
+    // Returns the current pause at once, unless `next` asks for a new one
+    // (e.g. another request pausing while one is already paused).
+    waitForStop(timeoutMs: number, { next = false } = {}): Promise<WaitResult<S>> {
+        const current = next ? undefined : this.currentStop();
         if (current) {
             return Promise.resolve({ kind: 'stopped', ...current });
         }
@@ -222,10 +244,15 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
     }
 
     private onAdapterResponse(tracked: Tracked<S>, message: any) {
-        const command = tracked.pendingRequests.get(message.request_seq) ?? message.command;
+        const request = tracked.pendingRequests.get(message.request_seq);
+        const command = request?.command ?? message.command;
         tracked.pendingRequests.delete(message.request_seq);
         if (command === 'initialize' && message.success) {
             tracked.capabilities = message.body ?? {};
+        }
+        // DAP: a continue resumes every thread unless the response says otherwise.
+        if (command === 'continue' && message.success && message.body?.allThreadsContinued !== false) {
+            tracked.paused.clear();
         }
         [...this.responseListeners].forEach(listener => listener(command));
     }
@@ -234,11 +261,11 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         switch (event) {
             case 'stopped':
                 tracked.lastStop = { reason: body.reason, threadId: body.threadId, description: body.description, text: body.text };
-                tracked.stoppedAt = ++this.stopCounter;
+                tracked.paused.set(body.threadId ?? NO_THREAD, { stop: tracked.lastStop, order: ++this.stopCounter });
                 this.notify({ kind: 'stopped', session: tracked.session, stop: tracked.lastStop });
                 break;
             case 'continued':
-                tracked.stoppedAt = 0;
+                this.resume(tracked, body.allThreadsContinued ? undefined : body.threadId);
                 break;
             case 'output':
                 this.appendOutput(tracked, body);
@@ -260,12 +287,22 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         }
     }
 
+    // Marks one thread, or with no thread id all threads, as running.
+    private resume(tracked: Tracked<S>, threadId: number | undefined) {
+        if (threadId === undefined) {
+            tracked.paused.clear();
+        } else {
+            tracked.paused.delete(threadId);
+            tracked.paused.delete(NO_THREAD);
+        }
+    }
+
     private end(tracked: Tracked<S>) {
         if (tracked.ended) {
             return;
         }
         tracked.ended = true;
-        tracked.stoppedAt = 0;
+        tracked.paused.clear();
         this.sessions.delete(tracked.session.id);
         if (!this.hasLiveSession()) {
             this.notify({ kind: 'terminated' });
@@ -283,4 +320,12 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
 
 function truncate(text: string, max: number): string {
     return text.length <= max ? text : `${text.slice(0, max)}… (${text.length - max} more characters)`;
+}
+
+function latestPause(tracked: Tracked<unknown>): Pause | undefined {
+    let latest: Pause | undefined;
+    for (const pause of tracked.paused.values()) {
+        if (!latest || pause.order > latest.order) { latest = pause; }
+    }
+    return latest;
 }

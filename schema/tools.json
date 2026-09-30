@@ -1,307 +1,738 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "Blackbox Tool Definitions",
-    "description": "Canonical tool contract for the Blackbox multi-IDE debugger. All IDE implementations must expose these tools with matching names and input schemas.",
-    "version": "0.1.0",
+    "description": "Canonical tool contract for Blackbox. Every IDE implementation exposes these tools with these names, descriptions, input schemas and annotations; the VS Code extension serves this file over MCP and generates its chat tools from it.",
+    "version": "0.4.0",
     "tools": [
+        {
+            "name": "ide_list_windows",
+            "displayName": "List Editor Windows",
+            "description": "List the editor windows (VS Code, Cursor, and other VS Code-based editors) that this session can control. For each: its editor and version, folders, whether this session uses it (selected), whether this session was started from it (launchedFrom), whether it runs an outdated extension, its breakpoint count, and its debugger state (running, or stopped at file:line). Call it when a call fails because the window is ambiguous or missing, or before debugging when several windows are open; then pick one with ide_select_window.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "List Editor Windows",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
+        },
+        {
+            "name": "ide_select_window",
+            "displayName": "Select Editor Window",
+            "description": "Choose which editor window this session controls, for all following calls. The choice lasts for this session and survives a window reload; if that window closes, calls fail instead of switching to another. Omit window to go back to automatic selection (by working directory, then by the window this session was started from).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": {
+                        "type": "string",
+                        "description": "Window id, absolute folder path, or folder name from ide_list_windows (e.g. \"wpcore.wpx\"). Omit to clear the selection"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "Editor name, or part of it (e.g. \"Cursor\", \"Visual Studio Code\"), when the same folder is open in several editors"
+                    }
+                }
+            },
+            "annotations": {
+                "title": "Select Editor Window",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true
+            }
+        },
         {
             "name": "debug_set_breakpoint",
             "displayName": "Set Breakpoint",
-            "description": "Set breakpoints in source files to pause execution. Supports conditions and log messages.",
+            "description": "Add source breakpoints: pause when execution reaches a line. Pass one breakpoint as file + line, or several as breakpoints. Supports a condition, a hit count, and logpoints (log a message instead of pausing). Setting it again on the same line adds another breakpoint; check debug_list_breakpoints first. Breakpoints apply to the current and future debug sessions. Returns one \"ok:\" or \"skip:\" line per breakpoint, plus a note if the debug adapter can't do hit counts.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "file": {
                         "type": "string",
-                        "description": "Absolute file path"
+                        "description": "Absolute path of the source file, as it exists in the editor's workspace"
                     },
                     "line": {
                         "type": "number",
-                        "description": "Line number (1-based)"
+                        "description": "Line number, counted from 1"
                     },
                     "condition": {
                         "type": "string",
-                        "description": "Optional condition expression"
+                        "description": "Pause only when this expression is true, in the debugged language's syntax (e.g. \"$count > 5\")"
+                    },
+                    "hitCondition": {
+                        "type": "string",
+                        "description": "Pause only on a given hit count: \"5\" (the 5th hit), \">= 10\", \"% 3\" (every 3rd). Adapter syntax may vary"
                     },
                     "logMessage": {
                         "type": "string",
-                        "description": "Optional log message (logpoint)"
+                        "description": "Log this message instead of pausing (a logpoint); {expression} parts are evaluated, e.g. \"total={$total}\". Read it with debug_get_output"
                     },
                     "breakpoints": {
                         "type": "array",
-                        "description": "Batch: array of {file, line, condition?, logMessage?}",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "file": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Absolute path of the source file, as it exists in the editor's workspace"
                                 },
                                 "line": {
-                                    "type": "number"
+                                    "type": "number",
+                                    "description": "Line number, counted from 1"
                                 },
                                 "condition": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Pause only when this expression is true, in the debugged language's syntax (e.g. \"$count > 5\")"
+                                },
+                                "hitCondition": {
+                                    "type": "string",
+                                    "description": "Pause only on a given hit count: \"5\" (the 5th hit), \">= 10\", \"% 3\" (every 3rd). Adapter syntax may vary"
                                 },
                                 "logMessage": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Log this message instead of pausing (a logpoint); {expression} parts are evaluated, e.g. \"total={$total}\". Read it with debug_get_output"
                                 }
                             },
                             "required": [
                                 "file",
                                 "line"
                             ]
-                        }
+                        },
+                        "description": "Several breakpoints at once, instead of file + line"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Set Breakpoint",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
+            }
+        },
+        {
+            "name": "debug_set_function_breakpoint",
+            "displayName": "Set Function Breakpoint",
+            "description": "Pause when a function is called, by name, without knowing its file and line (e.g. \"wp_update_plugins\", \"MyClass::save\", \"handleRequest\"). Supports a condition, hit count and log message. Not every debug adapter supports function breakpoints (PHP/Xdebug does; the result notes when the active adapter doesn't).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Function or method name, in the language's notation"
+                    },
+                    "condition": {
+                        "type": "string",
+                        "description": "Pause only when this expression is true, in the debugged language's syntax (e.g. \"$count > 5\")"
+                    },
+                    "hitCondition": {
+                        "type": "string",
+                        "description": "Pause only on a given hit count: \"5\" (the 5th hit), \">= 10\", \"% 3\" (every 3rd). Adapter syntax may vary"
+                    },
+                    "logMessage": {
+                        "type": "string",
+                        "description": "Log this message instead of pausing (a logpoint); {expression} parts are evaluated, e.g. \"total={$total}\". Read it with debug_get_output"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            },
+            "annotations": {
+                "title": "Set Function Breakpoint",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "debug_remove_breakpoint",
-            "displayName": "Remove Breakpoint",
-            "description": "Remove one or more breakpoints by file and line.",
+            "displayName": "Remove Breakpoints",
+            "description": "Remove source breakpoints by file and line, and function breakpoints by name. Pass file + line for one, breakpoints for several, and/or functions. Returns one \"ok:\" or \"skip:\" line per item. To keep a breakpoint for later, disable it with debug_toggle_breakpoints instead.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "file": {
                         "type": "string",
-                        "description": "Absolute file path"
+                        "description": "Absolute path of the source file, as it exists in the editor's workspace"
                     },
                     "line": {
                         "type": "number",
-                        "description": "Line number (1-based)"
+                        "description": "Line number, counted from 1"
                     },
                     "breakpoints": {
                         "type": "array",
-                        "description": "Batch: array of {file, line}",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "file": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Absolute path of the source file, as it exists in the editor's workspace"
                                 },
                                 "line": {
-                                    "type": "number"
+                                    "type": "number",
+                                    "description": "Line number, counted from 1"
                                 }
                             },
                             "required": [
                                 "file",
                                 "line"
                             ]
-                        }
+                        },
+                        "description": "Several source breakpoints to remove"
+                    },
+                    "functions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Names of function breakpoints to remove"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Remove Breakpoints",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": true,
+                "idempotentHint": true
             }
         },
         {
             "name": "debug_remove_all_breakpoints",
             "displayName": "Remove All Breakpoints",
-            "description": "Remove all breakpoints at once."
+            "description": "Remove every breakpoint in the window: source, function and any others, including ones the user set. Consider debug_toggle_breakpoints to disable them instead.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "Remove All Breakpoints",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": true,
+                "idempotentHint": true
+            }
         },
         {
             "name": "debug_list_breakpoints",
             "displayName": "List Breakpoints",
-            "description": "List all currently set breakpoints with file, line, condition, and enabled status."
+            "description": "List every breakpoint in the window: source breakpoints (file, line) and function breakpoints (name), with enabled state, condition, hit condition and log message.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "List Breakpoints",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
+        },
+        {
+            "name": "debug_toggle_breakpoints",
+            "displayName": "Enable or Disable Breakpoints",
+            "description": "Enable or disable breakpoints without removing them, keeping their conditions. Pass breakpoints (file + line) and/or functions (names); with neither, applies to every breakpoint. Returns how many changed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "true to enable, false to disable"
+                    },
+                    "breakpoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file": {
+                                    "type": "string",
+                                    "description": "Absolute path of the source file, as it exists in the editor's workspace"
+                                },
+                                "line": {
+                                    "type": "number",
+                                    "description": "Line number, counted from 1"
+                                }
+                            },
+                            "required": [
+                                "file",
+                                "line"
+                            ]
+                        },
+                        "description": "Source breakpoints to change"
+                    },
+                    "functions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Function breakpoint names to change"
+                    }
+                },
+                "required": [
+                    "enabled"
+                ]
+            },
+            "annotations": {
+                "title": "Enable or Disable Breakpoints",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true
+            }
+        },
+        {
+            "name": "debug_get_launch_configs",
+            "displayName": "Get Launch Configurations",
+            "description": "List the debug launch configurations defined for the workspace (launch.json or the workspace file), per folder, with all their settings (type, request, port, path mappings, adapter options). Call it before debug_start and pass a configuration's name as configName.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "Get Launch Configurations",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
         },
         {
             "name": "debug_start",
             "displayName": "Start Debug Session",
-            "description": "Start a debug session, preferably by the name of a launch configuration (configName) so its settings are used as-is; otherwise from type and request.",
+            "description": "Start a debug session. Preferred: pass configName, the name of a launch configuration from debug_get_launch_configs, so all its settings are used as-is. Otherwise pass type and request plus any adapter settings (port, program, pathMappings, and any other launch configuration property). For request-triggered debuggers such as PHP Xdebug, the session only listens: trigger the code afterwards (e.g. an HTTP request with ?XDEBUG_TRIGGER=1, adding a unique query parameter if pages may be cached), then call debug_wait_for_stop.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "configName": {
                         "type": "string",
-                        "description": "Name of a launch configuration or compound"
+                        "description": "Name of a launch configuration or compound from debug_get_launch_configs"
                     },
                     "folder": {
                         "type": "string",
-                        "description": "Workspace folder whose launch configuration to use"
+                        "description": "Absolute workspace folder path whose configuration to use, when several folders define the same name"
                     },
                     "type": {
                         "type": "string",
-                        "description": "Debug adapter type (e.g. php, node, python, go, cppdbg)"
+                        "description": "Debug adapter type when not using configName: php, node, python, go, cppdbg, java, ..."
                     },
                     "request": {
                         "type": "string",
-                        "description": "launch or attach"
+                        "description": "\"launch\" (start a program, or listen for PHP Xdebug) or \"attach\" (connect to a running one), when not using configName"
                     },
                     "name": {
                         "type": "string",
-                        "description": "Session display name"
+                        "description": "Display name for the session (default: \"Debug (<type>)\")"
                     },
                     "port": {
                         "type": "number",
-                        "description": "Debug port"
+                        "description": "Port the adapter listens on or connects to (e.g. 9003 for Xdebug)"
                     },
                     "program": {
                         "type": "string",
-                        "description": "Program to debug (for launch)"
+                        "description": "Absolute path of the program to launch"
                     },
                     "pathMappings": {
                         "type": "object",
-                        "description": "Remote to local path mappings"
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "Map of server/remote paths to local paths, e.g. {\"/var/www/html\": \"/Users/me/site\"}"
                     }
-                }
+                },
+                "additionalProperties": true
+            },
+            "annotations": {
+                "title": "Start Debug Session",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "debug_stop",
             "displayName": "Stop Debug Session",
-            "description": "Stop the currently active debug session."
+            "description": "Stop the active debug session, including any child sessions it started; for listeners such as PHP Xdebug this frees the port. Call debug_wait_for_stop afterwards to confirm it reports \"terminated\".",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "Stop Debug Session",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": true,
+                "idempotentHint": true
+            }
         },
         {
             "name": "debug_restart",
             "displayName": "Restart Debug Session",
-            "description": "Restart the currently active debug session."
+            "description": "Restart the active debug session with the same configuration. If the debug adapter can't restart, the session is stopped instead and the result says so; start it again with debug_start.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "Restart Debug Session",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": true,
+                "idempotentHint": false
+            }
         },
         {
             "name": "debug_continue",
             "displayName": "Continue",
-            "description": "Resume execution. Does not wait: call debug_wait_for_stop for the next pause.",
+            "description": "Resume execution of a paused thread (the play button). Does not wait: call debug_wait_for_stop to wait for the next pause. For PHP, other paused requests (threads) stay paused.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "threadId": {
                         "type": "number",
-                        "description": "Thread to act on (default: the paused or focused thread)"
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Continue",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "debug_pause",
             "displayName": "Pause",
-            "description": "Pause a running program and report where it stopped.",
+            "description": "Pause a running thread (the pause button) and report where it stopped: file, line, function and top frames.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "threadId": {
                         "type": "number",
-                        "description": "Thread to act on (default: the paused or focused thread)"
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Pause",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "debug_step_over",
             "displayName": "Step Over",
-            "description": "Execute the next line, stepping over calls, and report the new location.",
+            "description": "Run the current line, stepping over function calls, and report the new location (file, line, function, top frames). Returns state \"running\" if it has not paused within 10 seconds (e.g. the line blocks); then call debug_wait_for_stop.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "threadId": {
                         "type": "number",
-                        "description": "Thread to act on (default: the paused or focused thread)"
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Step Over",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "debug_step_into",
             "displayName": "Step Into",
-            "description": "Step into the next call and report the new location.",
+            "description": "Step into the function called on the current line (or to the next line if there is no call) and report the new location.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "threadId": {
                         "type": "number",
-                        "description": "Thread to act on (default: the paused or focused thread)"
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Step Into",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "debug_step_out",
             "displayName": "Step Out",
-            "description": "Step out of the current function and report the new location.",
+            "description": "Run until the current function returns and report the new location in the caller. Stepping out of the outermost frame runs the program on until its next pause or its end.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "threadId": {
                         "type": "number",
-                        "description": "Thread to act on (default: the paused or focused thread)"
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Step Out",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
-            "name": "debug_evaluate",
-            "displayName": "Evaluate Expression",
-            "description": "Evaluate an expression at the current breakpoint.",
+            "name": "debug_run_to_line",
+            "displayName": "Run to Line",
+            "description": "Continue until a given line is reached (\"run to cursor\"), using a temporary breakpoint that is always removed afterwards. Reports where it paused; reachedTarget is false if something else paused it first (another breakpoint, an exception) or state is \"running\" if the line wasn't reached before the timeout.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "expression": {
+                    "file": {
                         "type": "string",
-                        "description": "Expression to evaluate"
+                        "description": "Absolute path of the source file, as it exists in the editor's workspace"
                     },
-                    "frameId": {
+                    "line": {
                         "type": "number",
-                        "description": "Stack frame ID (default: top frame)"
+                        "description": "Line number, counted from 1"
+                    },
+                    "timeoutMs": {
+                        "type": "number",
+                        "description": "How long to wait in milliseconds (default 30000, max 300000)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 },
                 "required": [
-                    "expression"
+                    "file",
+                    "line"
                 ]
+            },
+            "annotations": {
+                "title": "Run to Line",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
-            "name": "debug_get_variables",
-            "displayName": "Get Variables",
-            "description": "Get all variables in the current scope when stopped at a breakpoint.",
+            "name": "debug_wait_for_stop",
+            "displayName": "Wait for Stop",
+            "description": "Wait until the debugger pauses (breakpoint, exception, step, pause) and report the reason, session, thread, file, line, function and top frames. Returns at once if it is already paused, unless next is true. Use after debug_start or debug_continue, or after triggering the code. Returns state \"running\" on timeout, which is not an error: call it again to keep waiting. Returns state \"terminated\" when no debug session is left.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "variablesReference": {
+                    "timeoutMs": {
                         "type": "number",
-                        "description": "Expand a specific variable reference"
+                        "description": "How long to wait in milliseconds (default 30000, max 300000)"
                     },
-                    "filter": {
-                        "type": "string",
-                        "description": "Filter variables by name (case-insensitive)"
+                    "next": {
+                        "type": "boolean",
+                        "description": "Wait for a new pause even if already paused, e.g. another PHP request (thread) hitting a breakpoint while one is paused"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Wait for Stop",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
+        },
+        {
+            "name": "debug_list_threads",
+            "displayName": "List Threads",
+            "description": "List the threads of the active debug session, marking the paused ones. For PHP/Xdebug each concurrent HTTP request is its own thread; pass a thread id as threadId to other tools to act on that request.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "List Threads",
+                "readOnlyHint": true,
+                "openWorldHint": false
             }
         },
         {
             "name": "debug_get_stack_trace",
             "displayName": "Get Stack Trace",
-            "description": "Get the call stack when stopped at a breakpoint."
+            "description": "Get the call stack of a paused thread: frame id, function, file and line for each frame, innermost first. Pass a frame id as frameId to debug_get_variables, debug_evaluate, debug_inspect or debug_get_source_context to look at that caller.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
+                    },
+                    "levels": {
+                        "type": "number",
+                        "description": "Maximum number of frames (default 20, max 200)"
+                    }
+                }
+            },
+            "annotations": {
+                "title": "Get Stack Trace",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
         },
         {
-            "name": "debug_get_launch_configs",
-            "displayName": "Get Launch Configs",
-            "description": "List all debug launch configurations from the workspace."
+            "name": "debug_get_variables",
+            "displayName": "Get Variables",
+            "description": "List the variables visible in a paused frame, grouped by scope (e.g. Locals, Superglobals), with name, value and type. Values of objects and arrays are summaries: pass a variable's variablesReference to list its children, or use debug_inspect to expand a whole structure. Use filter to narrow long lists.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "variablesReference": {
+                        "type": "number",
+                        "description": "Expand this container instead of listing scopes; returns its children, each with its own variablesReference when expandable"
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": "Only variables whose name contains this text (case-insensitive)"
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame id from debug_get_stack_trace (default: the top frame of the thread)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
+                    }
+                }
+            },
+            "annotations": {
+                "title": "Get Variables",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
+        },
+        {
+            "name": "debug_evaluate",
+            "displayName": "Evaluate Expression",
+            "description": "Evaluate an expression in a paused frame and return its value and type, in the exact syntax of the language being debugged (e.g. \"$post->ID\" for PHP, \"user.name\" for JavaScript, \"self.items\" for Python). It runs in the program: function calls and assignments execute and can change its state. For a nested object prefer debug_inspect; to read many variables, debug_get_variables.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Expression in the debugged language, e.g. \"count($items)\", \"get_option('siteurl')\", \"req.body\""
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame id from debug_get_stack_trace (default: the top frame of the thread)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
+                    }
+                },
+                "required": [
+                    "expression"
+                ]
+            },
+            "annotations": {
+                "title": "Evaluate Expression",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
+            }
         },
         {
             "name": "debug_inspect",
-            "displayName": "Deep Inspect Variable",
-            "description": "Recursively expand a variable's nested data structures.",
+            "displayName": "Inspect Variable",
+            "description": "Evaluate a variable or expression and expand its nested structure (objects, arrays, maps) into JSON, a few levels deep. Best for understanding a complex value in one call; like debug_evaluate, the expression runs in the program.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "variable": {
                         "type": "string",
-                        "description": "Variable or expression to inspect"
+                        "description": "Variable or expression in the debugged language, e.g. \"$wp_query\", \"req.body\", \"self.config\""
                     },
                     "depth": {
                         "type": "number",
-                        "description": "Max expansion depth (1-5, default: 2)"
+                        "description": "Levels to expand, 1 to 5 (default 2)"
                     },
                     "maxItems": {
                         "type": "number",
-                        "description": "Max items per level (default: 50, max: 200)"
+                        "description": "Maximum children per level, up to 200 (default 50)"
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame id from debug_get_stack_trace (default: the top frame of the thread)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 },
                 "required": [
                     "variable"
                 ]
+            },
+            "annotations": {
+                "title": "Inspect Variable",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
+            }
+        },
+        {
+            "name": "debug_set_variable",
+            "displayName": "Set Variable",
+            "description": "Change a variable's value while paused, to test a hypothesis without editing code (e.g. set \"$cache\" to \"null\", then step on). Uses the debug adapter's setVariable, or setExpression when that isn't available. Returns the new value; fails with an explanation if the adapter can't change variables.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Variable name as shown by debug_get_variables, e.g. \"$count\" (PHP) or \"count\" (JavaScript)"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "New value as an expression in the debugged language, e.g. \"0\", \"'abc'\", \"null\", \"[]\""
+                    },
+                    "variablesReference": {
+                        "type": "number",
+                        "description": "Container holding a nested variable, from debug_get_variables (default: the frame's scope that has the name)"
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame id from debug_get_stack_trace (default: the top frame of the thread)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
+                    }
+                },
+                "required": [
+                    "name",
+                    "value"
+                ]
+            },
+            "annotations": {
+                "title": "Set Variable",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": true,
+                "idempotentHint": true
             }
         },
         {
             "name": "debug_watch",
             "displayName": "Watch Expressions",
-            "description": "Manage persistent watch expressions across step operations.",
+            "description": "Keep a list of watch expressions for this window and evaluate them all at once, to follow values while stepping: add expressions once, then call action \"list\" after each step or continue. The list persists across steps and debug sessions until cleared.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -313,65 +744,98 @@
                             "list",
                             "clear"
                         ],
-                        "description": "Operation to perform"
+                        "description": "add or remove expressions, list to evaluate all of them now, clear to remove all"
                     },
                     "expressions": {
                         "type": "array",
                         "items": {
                             "type": "string"
                         },
-                        "description": "Expressions to add/remove"
+                        "description": "Expressions to add or remove, in the debugged language's syntax"
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame id from debug_get_stack_trace (default: the top frame of the thread)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 },
                 "required": [
                     "action"
                 ]
+            },
+            "annotations": {
+                "title": "Watch Expressions",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
-            "name": "debug_wait_for_stop",
-            "displayName": "Wait for Stop",
-            "description": "Wait until the debugger pauses and report the reason, file, line, function and top frames. Returns at once if already paused; returns state \"running\" on timeout.",
+            "name": "debug_get_source_context",
+            "displayName": "Get Source Context",
+            "description": "Show the source lines around where a thread is paused (or around frameId), with the current line marked. Reads the editor's copy, so unsaved edits are included.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "timeoutMs": {
+                    "lines": {
                         "type": "number",
-                        "description": "How long to wait (default 30000)"
+                        "description": "Lines before and after the current one (default 5, max 50)"
+                    },
+                    "frameId": {
+                        "type": "number",
+                        "description": "Stack frame id from debug_get_stack_trace (default: the top frame of the thread)"
+                    },
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread id from debug_list_threads (default: the paused thread, else the focused one)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Get Source Context",
+                "readOnlyHint": true,
+                "openWorldHint": false
             }
         },
         {
             "name": "debug_get_output",
-            "displayName": "Get Output",
-            "description": "Read program output and debug console messages, including logpoint messages, after a sequence number. Long entries are shortened; more is true when entries were left out.",
+            "displayName": "Get Debug Output",
+            "description": "Read program output (stdout, stderr) and debug console messages, including logpoint messages from debug_set_breakpoint logMessage. Entries are numbered: pass the returned nextSince as since to get only newer entries; more is true when entries were left out by limit or size. Long entries are shortened. Some adapters log their own protocol traffic here (e.g. PHP with \"log\": true), so use match to find what you need.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "since": {
                         "type": "number",
-                        "description": "Return entries after this sequence number"
+                        "description": "Only entries after this sequence number (default 0: all kept entries, the last 1000)"
                     },
                     "category": {
                         "type": "string",
-                        "description": "stdout, stderr, console or important"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum entries (default 200)"
+                        "description": "Only this category: stdout, stderr, console or important"
                     },
                     "match": {
                         "type": "string",
-                        "description": "Only entries containing this text (case-insensitive)"
+                        "description": "Only entries containing this text (case-insensitive), e.g. \"logpoint\""
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum entries to return (default 200)"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Get Debug Output",
+                "readOnlyHint": true,
+                "openWorldHint": false
             }
         },
         {
             "name": "debug_set_exception_breakpoints",
             "displayName": "Set Exception Breakpoints",
-            "description": "List the exception filters the debug adapter offers, or enable some of them for the active session.",
+            "description": "Pause when exceptions or errors are raised. Call without filters to list what the active debug adapter offers (PHP: Notice, Warning, Error, Deprecated, Exception, *; Node: all, uncaught), then call with the filter ids to enable. An empty list turns them off. Applies to the active session only, resets when a new session starts, and is not shown in the editor's Breakpoints panel.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -380,15 +844,22 @@
                         "items": {
                             "type": "string"
                         },
-                        "description": "Filter ids to enable; empty to disable"
+                        "description": "Filter ids from the list call, e.g. [\"Exception\", \"Warning\"]; [] to turn off"
                     }
                 }
+            },
+            "annotations": {
+                "title": "Set Exception Breakpoints",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false
             }
         },
         {
             "name": "editor_open_file",
             "displayName": "Open File",
-            "description": "Open a file in the editor, optionally at a specific line.",
+            "description": "Open a file in the editor and optionally move the cursor to a line, e.g. to show the user where the debugger stopped.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -398,79 +869,86 @@
                     },
                     "line": {
                         "type": "number",
-                        "description": "Line number to scroll to (1-based)"
+                        "description": "Line number, counted from 1"
                     }
                 },
                 "required": [
                     "file"
                 ]
+            },
+            "annotations": {
+                "title": "Open File",
+                "readOnlyHint": false,
+                "openWorldHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true
             }
         },
         {
             "name": "editor_get_open_files",
             "displayName": "Get Open Files",
-            "description": "List all files currently open in editor tabs."
+            "description": "List the files open in editor tabs, with which one is active and which have unsaved changes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "title": "Get Open Files",
+                "readOnlyHint": true,
+                "openWorldHint": false
+            }
         },
         {
             "name": "workspace_find_file",
             "displayName": "Find Files",
-            "description": "Find files in the workspace by glob pattern.",
+            "description": "Find files in the window's workspace folders by glob pattern, skipping node_modules. Returns absolute paths, ready for debug_set_breakpoint or editor_open_file.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Glob pattern (e.g. '**/*.php', '**/checkout*.ts')"
+                        "description": "Glob relative to the workspace folders, e.g. \"**/wp-settings.php\", \"src/**/*.ts\""
                     },
                     "maxResults": {
                         "type": "number",
-                        "description": "Maximum results (default: 20)"
+                        "description": "Maximum files to return (default 20)"
                     }
                 },
                 "required": [
                     "pattern"
                 ]
+            },
+            "annotations": {
+                "title": "Find Files",
+                "readOnlyHint": true,
+                "openWorldHint": false
             }
         },
         {
             "name": "workspace_get_diagnostics",
             "displayName": "Get Diagnostics",
-            "description": "Get errors and warnings from all language services.",
+            "description": "Get errors and warnings reported by the editor's language services (TypeScript, PHP, ESLint, ...), per file with line and message.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "file": {
                         "type": "string",
-                        "description": "Filter to specific file (absolute path)"
+                        "description": "Only this file (absolute path); default: every file with problems"
                     },
                     "severity": {
                         "type": "string",
-                        "description": "Filter by severity: error, warning"
+                        "enum": [
+                            "error",
+                            "warning"
+                        ],
+                        "description": "\"error\" for errors only, \"warning\" for errors and warnings (default: everything)"
                     }
                 }
-            }
-        },
-        {
-            "name": "ide_list_windows",
-            "displayName": "List IDE Windows",
-            "description": "Bridge tool (MCP transport only). List the IDE windows Blackbox can control: their folders, which one this session uses, and each debugger's state (running, or stopped at file:line)."
-        },
-        {
-            "name": "ide_select_window",
-            "displayName": "Select IDE Window",
-            "description": "Bridge tool (MCP transport only). Choose the IDE window this session controls, by window id, folder path or folder name. Omit window to return to automatic selection by working directory.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "window": {
-                        "type": "string",
-                        "description": "Window id, absolute folder path, or folder name"
-                    },
-                    "app": {
-                        "type": "string",
-                        "description": "Editor name or part of it, e.g. \"Cursor\""
-                    }
-                }
+            },
+            "annotations": {
+                "title": "Get Diagnostics",
+                "readOnlyHint": true,
+                "openWorldHint": false
             }
         }
     ]

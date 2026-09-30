@@ -149,4 +149,48 @@ suite('DebugEvents', () => {
         assert.strictEqual(page.more, true);
         assert.strictEqual(hub.readOutput({ since: page.nextSince }).entries[0].seq, page.nextSince + 1);
     });
+
+    test('tracks several paused threads in one session (Xdebug requests)', () => {
+        const { hub, childTracker } = setup();
+        childTracker.onDidSendMessage(stopped(2));
+        childTracker.onDidSendMessage(stopped(3));
+        assert.deepStrictEqual(hub.pausedThreads('c').sort(), [2, 3]);
+        assert.strictEqual(hub.currentStop()?.stop.threadId, 3, 'the latest pause is current');
+
+        childTracker.onWillReceiveMessage({ type: 'request', seq: 7, command: 'continue', arguments: { threadId: 3 } });
+        childTracker.onDidSendMessage({ type: 'response', request_seq: 7, success: true, body: { allThreadsContinued: false } });
+        assert.deepStrictEqual(hub.pausedThreads('c'), [2], 'thread 2 is still paused');
+        assert.strictEqual(hub.lastStop('c')?.threadId, 2);
+        assert.ok(hub.isPaused('c'));
+    });
+
+    test('a continue response without allThreadsContinued: false resumes every thread', () => {
+        const { hub, childTracker } = setup();
+        childTracker.onDidSendMessage(stopped(2));
+        childTracker.onDidSendMessage(stopped(3));
+        childTracker.onWillReceiveMessage({ type: 'request', seq: 8, command: 'continue', arguments: { threadId: 3 } });
+        childTracker.onDidSendMessage({ type: 'response', request_seq: 8, success: true, body: {} });
+        assert.deepStrictEqual(hub.pausedThreads('c'), []);
+    });
+
+    test('a continued event for one thread leaves the others paused', () => {
+        const { hub, childTracker } = setup();
+        childTracker.onDidSendMessage(stopped(2));
+        childTracker.onDidSendMessage(stopped(3));
+        childTracker.onDidSendMessage({ type: 'event', event: 'continued', body: { threadId: 2 } });
+        assert.deepStrictEqual(hub.pausedThreads('c'), [3]);
+        childTracker.onDidSendMessage({ type: 'event', event: 'continued', body: { threadId: 3, allThreadsContinued: true } });
+        assert.deepStrictEqual(hub.pausedThreads('c'), []);
+    });
+
+    test('next waits for a new pause while another thread is already paused', async () => {
+        const { hub, childTracker } = setup();
+        childTracker.onDidSendMessage(stopped(2));
+        assert.strictEqual((await hub.waitForStop(1000)).kind, 'stopped', 'without next it returns at once');
+        const pending = hub.waitForStop(1000, { next: true });
+        childTracker.onDidSendMessage(stopped(3));
+        const result = await pending;
+        assert.ok(result.kind === 'stopped' && result.stop.threadId === 3);
+        assert.strictEqual((await hub.waitForStop(20, { next: true })).kind, 'timeout');
+    });
 });

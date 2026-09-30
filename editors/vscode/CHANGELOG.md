@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 (Pre-release)
+
+- **New tools:** `debug_set_function_breakpoint`, `debug_toggle_breakpoints` (enable/disable without removing), `debug_run_to_line` (temporary breakpoint, always removed), `debug_list_threads`, `debug_set_variable` (via the adapter's setVariable or setExpression), `debug_get_source_context`.
+- `hitCondition` on `debug_set_breakpoint`; `functions` on `debug_remove_breakpoint`; function breakpoints and hit conditions in `debug_list_breakpoints`.
+- `threadId` and `frameId` on `debug_evaluate`, `debug_get_variables`, `debug_inspect` and `debug_watch`; `threadId` and `levels` on `debug_get_stack_trace`.
+- The result notes when the active debug adapter doesn't support function breakpoints or hit conditions.
+- **VS Code chat:** all 31 tools (everything except `ide_*`) are now available as `#` tools; 11 were missing before. Declarations are generated from `schema/tools.json` (`npm run sync:tools`).
+- One tool list (`tools/catalog.ts`) feeds both the MCP bridge and VS Code chat, and a contract test keeps MCP, the schema, `package.json` and the catalog identical.
+- **Tool descriptions for AI:** every tool description was rewritten to say what it does, when to use it instead of related tools, what it returns and its caveats (e.g. `debug_evaluate` runs code). All 75 parameters now have descriptions with formats and defaults (22 had none). MCP clients and VS Code chat now get the same text.
+- **MCP annotations:** every tool has a title and `readOnlyHint` / `destructiveHint` / `idempotentHint`, so clients can tell read-only calls (12 tools) from destructive ones (5).
+- The MCP server serves `schema/tools.json` directly and checks arguments against it, so a wrong type fails with a clear message (e.g. `arguments.line must be a number`). `debug_start` accepts any extra launch configuration property.
+- `debug_wait_for_stop {next: true}` waits for a new pause while another thread is already paused (e.g. a second PHP request).
+- Paused threads are tracked per thread, so `debug_list_threads` marks every paused PHP request, not just the latest.
+- The old shared `/tmp/blackbox/` folder is no longer read; windows on 0.2.0 or older need the update to be seen.
+
 ## 0.3.0 (Pre-release)
 
 - **Several editors:** windows record their editor (VS Code, Cursor, Antigravity, …), version and extension version. `ide_list_windows` shows them, `ide_select_window` accepts `app`, and labels name the editor when several are running.

@@ -3,7 +3,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { LEGACY_IPC_DIR, RegistryEntry, UNKNOWN_APP, ipcDir, isPrivateDir } from './protocol';
+import { RegistryEntry, UNKNOWN_APP, ipcDir, isPrivateDir } from './protocol';
 
 function isAlive(pid: number): boolean {
     try {
@@ -55,14 +55,7 @@ function readDir(dir: string): RegistryEntry[] {
 // Returns registry entries of live windows. Entries left behind by crashed
 // extension hosts are removed along with their sockets.
 export function listWindows(): RegistryEntry[] {
-    const dirs = process.env.BLACKBOX_IPC_DIR ? [ipcDir()] : [ipcDir(), LEGACY_IPC_DIR];
-    const byId = new Map<string, RegistryEntry>();
-    for (const entry of dirs.flatMap(readDir)) {
-        if (!byId.has(entry.id)) {
-            byId.set(entry.id, entry);
-        }
-    }
-    return [...byId.values()];
+    return readDir(ipcDir());
 }
 
 function normalize(p: string): string {

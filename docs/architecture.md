@@ -10,8 +10,8 @@ Blackbox provides a unified interface between AI models and IDEs via the **Model
 ## The Core Contract
 To ensure consistency across different IDEs (VS Code, JetBrains, etc.), Blackbox utilizes a centralized schema.
 
-* **Source of Truth:** [`/schema/tools.json`](/schema/tools.json) defines the canonical names, descriptions, and input parameters.
-* **Implementation Rule:** Each IDE implementation is independent but must strictly adhere to this JSON contract.
+* **Source of Truth:** [`/schema/tools.json`](/schema/tools.json) defines every tool's name, title, description, input schema (every parameter described) and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`).
+* **Implementation Rule:** Each IDE implementation is independent but must strictly adhere to this JSON contract. The VS Code extension doesn't restate it: its build copies the file to `out/tools.json`, the MCP server lists it verbatim and checks arguments against it (`mcp/toolSchema.ts`), and `npm run sync:tools` generates the chat tool declarations in `package.json` from it.
 
 ### Tool Taxonomy
 | Category | Functional Scope |
@@ -33,7 +33,7 @@ The VS Code architecture is designed for **convergence**. It allows both interna
 ### Technical Workflow
 1.  **Native Path (`languageModelTools`):** VS Code's internal chat (e.g., Copilot) accesses tools via thin wrappers in `tools/*.ts`.
 2.  **External Path (MCP Server):** External clients (Cursor, Claude Desktop) connect to `mcp/server.ts` via stdio. This server communicates with the Extension Host through a **Unix Socket** (newline-delimited JSON). Each editor window (VS Code, Cursor, Antigravity, …) listens on its own socket, `/tmp/blackbox-<uid>/<pid>.sock`, and writes `/tmp/blackbox-<uid>/<pid>.json` describing itself: folders, editor name and version, the editor's main process, and the extension and protocol versions (see [Choosing a window](#choosing-a-window)).
-3.  **Unified Implementation:** Both paths resolve to `tools/impl/*`, ensuring that a `debug_step_over` command behaves identically regardless of the trigger source.
+3.  **Unified Implementation:** Both paths register from one list, `tools/catalog.ts`, which maps each tool name to its implementation in `tools/impl/*`. So a `debug_step_over` behaves identically regardless of the trigger source, and neither path can miss a tool. The chat tool declarations in `package.json` are generated from `schema/tools.json` (`npm run sync:tools`), and a contract test checks the MCP server, the schema, `package.json` and the catalog all list the same tools with the same parameters.
 
 ### Communication Flow
 ```mermaid
@@ -46,15 +46,16 @@ graph TD
 
     subgraph "VS Code Extension Host (one per window)"
         C[IPC Handlers]
-        D[Native Copilot Chat] -- "Direct Call" --> E[Tool Wrappers]
+        D[Native Copilot Chat] -- "Direct Call" --> E[tools/chat.ts]
         
-        C --> F[tools/impl/ shared logic]
-        E --> F
+        C --> G[tools/catalog.ts]
+        E --> G
+        G --> F[tools/impl/ shared logic]
     end
 ```
 
 ### The IPC directory
-Sockets and registry files live in `/tmp/blackbox-<uid>/` (`%TEMP%\blackbox` and named pipes on Windows), one directory per user. The extension creates it with mode `0700` and refuses to start if it is a symlink, owned by someone else, or reachable by other users. The MCP server ignores a directory that fails the same check, so another local user can't plant registry entries. Sockets are named after the extension host's pid, so windows from different editors never clash. Until 0.4.0 the MCP server also reads the old shared `/tmp/blackbox/`, so windows still on 0.2.0 stay visible.
+Sockets and registry files live in `/tmp/blackbox-<uid>/` (`%TEMP%\blackbox` and named pipes on Windows), one directory per user. The extension creates it with mode `0700` and refuses to start if it is a symlink, owned by someone else, or reachable by other users. The MCP server ignores a directory that fails the same check, so another local user can't plant registry entries. Sockets are named after the extension host's pid, so windows from different editors never clash.
 
 ### Choosing a window
 The MCP server is started by the AI client, one per AI session, not by the editor. On every call its `BridgeSession` (`mcp/session.ts`) decides which window to use:
@@ -77,7 +78,8 @@ Layers on the MCP side, each depending only on the ones below:
 
 | File | Responsibility |
 | :--- | :--- |
-| `mcp/server.ts` | Tool registration and result formatting |
+| `mcp/server.ts` | Serves the tool contract, checks arguments, formats results |
+| `mcp/toolSchema.ts` | Loads `tools.json` and validates arguments against it |
 | `mcp/session.ts` | Routing policy and the per-session pin |
 | `mcp/launch.ts` | Which window or editor launched this session |
 | `ipc/registry.ts` | Discovering windows and matching folders |

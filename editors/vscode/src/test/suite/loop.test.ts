@@ -75,4 +75,50 @@ suite('Debug loop (Node fixture)', () => {
     test('an unknown launch configuration name lists the available ones', async () => {
         await assert.rejects(call('debug_start', { configName: 'Nope' }), /Available: Fixture/);
     });
+
+    test('hit counts, threads, frames, set variable, toggle, function breakpoints, run to line', async function () {
+        this.timeout(90_000);
+        vscode.debug.removeBreakpoints([...vscode.debug.breakpoints]);
+
+        await call('debug_set_breakpoint', { file: FIXTURE, line: BREAKPOINT_LINE, hitCondition: '2' });
+        await call('debug_start', { configName: 'Fixture' });
+        const hit = await callJson('debug_wait_for_stop', { timeoutMs: 30_000 }, 35_000);
+        assert.strictEqual(hit.line, BREAKPOINT_LINE, JSON.stringify(hit));
+        assert.strictEqual((await callJson('debug_evaluate', { expression: 'i' })).result, '2', 'hit condition skips the first pass');
+
+        const { threads } = await callJson('debug_list_threads');
+        assert.ok(threads.some((t: { id: number; stopped?: boolean }) => t.id === hit.threadId && t.stopped), JSON.stringify(threads));
+
+        const context = await callJson('debug_get_source_context', { lines: 1 });
+        assert.deepStrictEqual(context.lines.map((l: { line: number }) => l.line), [BREAKPOINT_LINE - 1, BREAKPOINT_LINE, BREAKPOINT_LINE + 1]);
+        assert.match(context.lines.find((l: { current?: boolean }) => l.current).text, /total = add\(total, i\)/);
+
+        const frames = await callJson('debug_get_stack_trace', { levels: 2 });
+        assert.strictEqual(frames.length, 2);
+        const locals = await callJson('debug_get_variables', { frameId: frames[0].id, filter: 'total' });
+        assert.ok(JSON.stringify(locals).includes('"total"'), JSON.stringify(locals));
+
+        assert.match(await call('debug_set_variable', { name: 'total', value: '100' }), /100/);
+        assert.strictEqual((await callJson('debug_evaluate', { expression: 'total' })).result, '100');
+
+        assert.match(await call('debug_toggle_breakpoints', { enabled: false }), /Disabled 1/);
+        assert.strictEqual((await callJson('debug_list_breakpoints'))[0].enabled, false);
+        assert.match(await call('debug_toggle_breakpoints', { enabled: true, breakpoints: [{ file: FIXTURE, line: BREAKPOINT_LINE }] }), /Enabled 1/);
+        assert.strictEqual((await callJson('debug_list_breakpoints'))[0].hitCondition, '2', 'toggling keeps the hit condition');
+
+        assert.match(await call('debug_set_function_breakpoint', { name: 'add' }), /ok: function add/);
+        assert.ok((await callJson('debug_list_breakpoints')).some((b: { type: string; name?: string }) => b.type === 'function' && b.name === 'add'));
+        assert.match(await call('debug_remove_breakpoint', { functions: ['add'] }), /removed function add/);
+
+        const reached = await callJson('debug_run_to_line', { file: FIXTURE, line: LOGPOINT_LINE, timeoutMs: 20_000 }, 35_000);
+        assert.strictEqual(reached.reachedTarget, true, JSON.stringify(reached));
+        const lines = (await callJson('debug_list_breakpoints')).map((b: { line?: number }) => b.line);
+        assert.deepStrictEqual(lines, [BREAKPOINT_LINE], 'the temporary breakpoint is removed');
+
+        await call('debug_remove_all_breakpoints');
+        await call('debug_continue');
+        assert.strictEqual((await callJson('debug_wait_for_stop', { timeoutMs: 20_000 }, 25_000)).state, 'terminated');
+        const out = (await callJson('debug_get_output', { match: 'total 102' })).entries;
+        assert.strictEqual(out.length, 1, 'the changed variable reached the program output');
+    });
 });
