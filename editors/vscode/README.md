@@ -95,7 +95,12 @@ Blackbox exposes debugging tools to AI models through two transport paths:
 
 ### Multiple VS Code windows
 
-Each window runs its own Blackbox bridge. Tool calls go to the window whose workspace folder contains the MCP client's working directory, otherwise to the window you focused last. To override this, set one of these in the server's `env`:
+Each VS Code window runs its own Blackbox bridge, and each AI session (Claude CLI, Cursor, …) chooses which window to control:
+
+* **Automatically**: if exactly one window has the folder you started the AI in (or a sub-folder of it) open, or only one window is running, calls go there.
+* **Otherwise the AI chooses**: calls fail with a list of windows. The AI then calls `ide_list_windows`, which shows each window's folders and debugger state, and `ide_select_window` (by folder name such as `wpcore.wpx`, path or id). The choice lasts for that AI session and survives window reloads.
+
+To fix the choice in configuration instead, set one of these in the server's `env`:
 
 * `BLACKBOX_WORKSPACE`: a folder to match instead of the working directory.
 * `BLACKBOX_SOCKET`: a socket path to always use, e.g. `/tmp/blackbox/<pid>.sock`.

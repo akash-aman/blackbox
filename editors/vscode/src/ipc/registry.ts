@@ -56,31 +56,34 @@ function contains(folder: string, target: string): boolean {
     return target === folder || target.startsWith(folder.endsWith(path.sep) ? folder : folder + path.sep);
 }
 
-// Picks the window for `cwd`:
-//   1. the window with the deepest workspace folder containing cwd,
-//   2. otherwise a window with a folder inside cwd,
-//   3. otherwise the most recently focused window.
-export function pickWindow(entries: RegistryEntry[], cwd: string): RegistryEntry | undefined {
-    const target = normalize(cwd);
-    let best: RegistryEntry | undefined;
-    let bestScore = -1;
+const NO_MATCH = -1;
 
-    for (const entry of entries) {
-        for (const folder of entry.folders.map(normalize)) {
-            let score = -1;
-            if (contains(folder, target)) {
-                score = 2_000_000 + folder.length;
-            } else if (contains(target, folder)) {
-                score = 1_000_000 - folder.length;
-            }
-            if (score > bestScore || (score === bestScore && best && entry.focusedAt > best.focusedAt)) {
-                best = entry;
-                bestScore = score;
-            }
-        }
+// Returns the windows that best match `dir`, with no fallback:
+//   1. windows whose folder contains dir, keeping only the deepest folder,
+//   2. otherwise windows with a folder inside dir.
+// An empty result means no match; more than one means it is ambiguous.
+export function matchWindows(entries: readonly RegistryEntry[], dir: string): RegistryEntry[] {
+    const target = normalize(dir);
+    const folders = entries.map(e => e.folders.map(normalize));
+    const depths = folders.map(fs => Math.max(NO_MATCH, ...fs.filter(f => contains(f, target)).map(f => f.length)));
+    const deepest = Math.max(NO_MATCH, ...depths);
+
+    if (deepest !== NO_MATCH) {
+        return entries.filter((_, i) => depths[i] === deepest);
     }
-    if (best) {
-        return best;
+    return entries.filter((_, i) => folders[i].some(f => contains(target, f)));
+}
+
+// Resolves a user-supplied window reference: an exact id, then a path,
+// then a folder name (case-insensitive).
+export function findWindows(entries: readonly RegistryEntry[], ref: string): RegistryEntry[] {
+    const byId = entries.filter(e => e.id === ref);
+    if (byId.length > 0) {
+        return byId;
     }
-    return [...entries].sort((a, b) => b.focusedAt - a.focusedAt)[0];
+    if (path.isAbsolute(ref)) {
+        return matchWindows(entries, ref);
+    }
+    const name = ref.toLowerCase();
+    return entries.filter(e => e.folders.some(f => path.basename(f).toLowerCase() === name));
 }

@@ -1,14 +1,14 @@
-// IPC client used by the MCP stdio server. Resolves the target window on
-// every call, so windows can reload or restart without reconnecting MCP.
+// IPC transport used by the MCP stdio server: sends one request to one
+// window's socket. Choosing the window is BridgeSession's job
+// (mcp/session.ts).
 
 import * as net from 'net';
 import { IPCRequest, IPCResponse } from './protocol';
-import { listWindows, pickWindow } from './registry';
 
 const RETRY_DELAYS_MS = [250, 500, 750];
 // Only errors where the request never reached VS Code, so a retry cannot
-// run a tool (e.g. a step) twice.
-const RETRYABLE = new Set(['ENOENT', 'ECONNREFUSED']);
+// run a tool (e.g. a step) twice. NO_WINDOWS covers a window still starting.
+const RETRYABLE = new Set(['ENOENT', 'ECONNREFUSED', 'NO_WINDOWS']);
 
 let requestId = 0;
 
@@ -18,32 +18,43 @@ export class IPCError extends Error {
     }
 }
 
-export interface CallOptions {
-    timeoutMs: number;
-    cwd?: string;
+export interface ToolCall {
+    readonly tool: string;
+    readonly args: Record<string, unknown>;
+    readonly timeoutMs: number;
 }
 
-// BLACKBOX_SOCKET pins a socket; BLACKBOX_WORKSPACE overrides the directory
-// used to pick a window (defaults to the MCP server's cwd).
-function resolveSocket(cwd: string): string {
-    if (process.env.BLACKBOX_SOCKET) {
-        return process.env.BLACKBOX_SOCKET;
-    }
-    const window = pickWindow(listWindows(), cwd);
-    if (!window) {
-        throw new IPCError('No VS Code window with the Blackbox extension is running.', 'ENOENT');
-    }
-    return window.socket;
+export type Send = (socket: string, call: ToolCall) => Promise<IPCResponse>;
+
+function isRetryable(err: unknown): boolean {
+    const code = (err as { code?: unknown } | null)?.code;
+    return typeof code === 'string' && RETRYABLE.has(code);
 }
 
-function send(socket: string, req: IPCRequest, timeoutMs: number): Promise<IPCResponse> {
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await fn();
+        } catch (err: unknown) {
+            if (attempt >= RETRY_DELAYS_MS.length || !isRetryable(err)) {
+                throw err;
+            }
+            await sleep(RETRY_DELAYS_MS[attempt]);
+        }
+    }
+}
+
+export const callExtension: Send = (socket, { tool, args, timeoutMs }) => {
+    const req: IPCRequest = { id: String(++requestId), tool, args };
     return new Promise((resolve, reject) => {
         const client = net.createConnection(socket, () => {
             client.write(JSON.stringify(req) + '\n');
         });
         const timer = setTimeout(() => {
             client.destroy();
-            reject(new IPCError(`VS Code did not answer ${req.tool} within ${timeoutMs / 1000}s.`, 'ETIMEDOUT'));
+            reject(new IPCError(`VS Code did not answer ${tool} within ${timeoutMs / 1000}s.`, 'ETIMEDOUT'));
         }, timeoutMs);
 
         let buffer = '';
@@ -66,24 +77,4 @@ function send(socket: string, req: IPCRequest, timeoutMs: number): Promise<IPCRe
             reject(new IPCError(err.message, err.code));
         });
     });
-}
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-export async function callExtension(tool: string, args: Record<string, unknown>, options: CallOptions): Promise<IPCResponse> {
-    const cwd = options.cwd ?? process.env.BLACKBOX_WORKSPACE ?? process.cwd();
-    const req: IPCRequest = { id: String(++requestId), tool, args };
-
-    for (let attempt = 0; ; attempt++) {
-        try {
-            // Re-resolve each attempt: a restarted window gets a new socket.
-            return await send(resolveSocket(cwd), req, options.timeoutMs);
-        } catch (err: unknown) {
-            const code = err instanceof IPCError ? err.code : undefined;
-            if (attempt >= RETRY_DELAYS_MS.length || !code || !RETRYABLE.has(code)) {
-                throw err;
-            }
-            await sleep(RETRY_DELAYS_MS[attempt]);
-        }
-    }
-}
+};

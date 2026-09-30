@@ -35,6 +35,23 @@ export interface RegistryEntry {
     focusedAt: number;
 }
 
+// Live state of a window, returned by the internal STATUS_TOOL handler.
+export interface WindowStatus {
+    folders: string[];
+    focused: boolean;
+    breakpoints: number;
+    debug: null | {
+        name: string;
+        type: string;
+        state: 'stopped' | 'running';
+        stoppedAt?: { file: string; line: number };
+    };
+}
+
+// Internal IPC tool used by the MCP server to describe windows. Not exposed
+// as an MCP tool itself.
+export const STATUS_TOOL = 'window_status';
+
 // A fixed directory rather than os.tmpdir(): the extension host and the MCP
 // server are started by different parents and often see different TMPDIRs.
 export function ipcDir(): string {

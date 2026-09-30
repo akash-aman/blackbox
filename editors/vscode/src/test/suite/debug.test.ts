@@ -2,6 +2,8 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { listWindows } from '../../ipc/registry';
+import { callExtension } from '../../ipc/client';
+import { STATUS_TOOL, WindowStatus } from '../../ipc/protocol';
 
 suite('Debug Tools', () => {
 
@@ -18,6 +20,22 @@ suite('Debug Tools', () => {
         const self = listWindows().find(w => w.pid === process.pid);
         assert.ok(self, 'No registry entry for this extension host');
         assert.ok(fs.existsSync(self!.socket), 'Socket file missing');
+    });
+
+    test('window status is served over the bridge socket', async () => {
+        const self = listWindows().find(w => w.pid === process.pid)!;
+        const bp = new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file('/tmp/test-status.php'), new vscode.Position(2, 0)));
+        vscode.debug.addBreakpoints([bp]);
+        try {
+            const resp = await callExtension(self.socket, { tool: STATUS_TOOL, args: {}, timeoutMs: 5000 });
+            const status: WindowStatus = JSON.parse(resp.result!);
+            assert.deepStrictEqual(status.folders, self.folders);
+            assert.strictEqual(status.debug, null);
+            assert.strictEqual(status.breakpoints, vscode.debug.breakpoints.length);
+            assert.ok(status.breakpoints >= 1);
+        } finally {
+            vscode.debug.removeBreakpoints([bp]);
+        }
     });
 
     test('breakpoints API should be available', () => {

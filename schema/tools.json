@@ -343,6 +343,25 @@
                     }
                 }
             }
+        },
+        {
+            "name": "ide_list_windows",
+            "displayName": "List IDE Windows",
+            "description": "Bridge tool (MCP transport only). List the IDE windows Blackbox can control: their folders, which one this session uses, and each debugger's state (running, or stopped at file:line)."
+        },
+        {
+            "name": "ide_select_window",
+            "displayName": "Select IDE Window",
+            "description": "Bridge tool (MCP transport only). Choose the IDE window this session controls, by window id, folder path or folder name. Omit window to return to automatic selection by working directory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": {
+                        "type": "string",
+                        "description": "Window id, absolute folder path, or folder name"
+                    }
+                }
+            }
         }
     ]
 }

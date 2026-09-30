@@ -32,24 +32,46 @@ The VS Code architecture is designed for **convergence**. It allows both interna
 
 ### Technical Workflow
 1.  **Native Path (`languageModelTools`):** VS Code's internal chat (e.g., Copilot) accesses tools via thin wrappers in `tools/*.ts`.
-2.  **External Path (MCP Server):** External clients (Cursor, Claude Desktop) connect to `mcp/server.ts` via stdio. This server communicates with the Extension Host through a **Unix Socket** (newline-delimited JSON). Each VS Code window listens on its own socket, `/tmp/blackbox/<pid>.sock`, and writes `/tmp/blackbox/<pid>.json` listing its workspace folders. On every tool call the MCP server picks the window whose folder contains its working directory, falling back to the most recently focused window.
+2.  **External Path (MCP Server):** External clients (Cursor, Claude Desktop) connect to `mcp/server.ts` via stdio. This server communicates with the Extension Host through a **Unix Socket** (newline-delimited JSON). Each VS Code window listens on its own socket, `/tmp/blackbox/<pid>.sock`, and writes `/tmp/blackbox/<pid>.json` listing its workspace folders (see [Choosing a window](#choosing-a-window)).
 3.  **Unified Implementation:** Both paths resolve to `tools/impl/*`, ensuring that a `debug_step_over` command behaves identically regardless of the trigger source.
 
 ### Communication Flow
 ```mermaid
 graph TD
-    subgraph "External Clients"
-        A[Cursor / Claude] -- "MCP (stdio)" --> B
+    subgraph "AI session (Cursor / Claude CLI)"
+        A[MCP Client] -- "MCP (stdio)" --> B[MCP Server Process]
     end
 
-    subgraph "VS Code Extension Host"
-        B[MCP Server Process] -- "IPC (Unix Socket)" --> C[IPC Handlers]
+    B -- "IPC (Unix Socket per window)" --> C
+
+    subgraph "VS Code Extension Host (one per window)"
+        C[IPC Handlers]
         D[Native Copilot Chat] -- "Direct Call" --> E[Tool Wrappers]
         
         C --> F[tools/impl/ shared logic]
         E --> F
     end
 ```
+
+### Choosing a window
+The MCP server is started by the AI client, one per AI session, not by VS Code. On every call its `BridgeSession` (`mcp/session.ts`) decides which window to use:
+
+1. `BLACKBOX_SOCKET`, if set.
+2. The window pinned with `ide_select_window`. After a reload it is found again by its folders. If it has closed, the call fails; the session never switches windows on its own.
+3. The single window whose folder contains the server's working directory (or `BLACKBOX_WORKSPACE`). A window opened on a sub-folder of that directory also counts.
+4. The only running window.
+
+Anything else (no window, or several candidates) returns an error listing the windows, so the AI can call `ide_list_windows` and `ide_select_window`. `ide_list_windows` also asks each window for its live state (`window_status`: folders, breakpoint count, and whether its debugger is running or stopped at file:line).
+
+Layers on the MCP side, each depending only on the ones below:
+
+| File | Responsibility |
+| :--- | :--- |
+| `mcp/server.ts` | Tool registration and result formatting |
+| `mcp/session.ts` | Routing policy and the per-session pin |
+| `ipc/registry.ts` | Discovering windows and matching folders |
+| `ipc/client.ts` | Sending one request to one socket, with retries |
+| `ipc/protocol.ts` | Wire types and socket/registry paths |
 
 ---
 

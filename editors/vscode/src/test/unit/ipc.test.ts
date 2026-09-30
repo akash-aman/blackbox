@@ -3,14 +3,14 @@
 
 import * as assert from 'assert';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { IPCServer } from '../../ipc/server';
 import { callExtension } from '../../ipc/client';
-import { listWindows, pickWindow } from '../../ipc/registry';
-import { RegistryEntry } from '../../ipc/protocol';
+import { listWindows, matchWindows, findWindows } from '../../ipc/registry';
+import { RegistryEntry, STATUS_TOOL, WindowStatus } from '../../ipc/protocol';
+import { BridgeSession } from '../../mcp/session';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -21,6 +21,8 @@ function tmpDir(prefix: string): string {
 
 function fakeWindow(id: string, folder: string, opts: { healthCheckMs?: number } = {}): IPCServer {
     const ipc = new IPCServer({ id, folders: [folder], healthCheckMs: opts.healthCheckMs });
+    const status: WindowStatus = { folders: [folder], focused: false, breakpoints: 0, debug: null };
+    ipc.register(STATUS_TOOL, async () => JSON.stringify(status));
     ipc.register('whoami', async () => id);
     ipc.register('slow', async () => { await sleep(300); return 'late'; });
     ipc.register('boom', async () => { throw new Error('kaboom'); });
@@ -31,6 +33,7 @@ suite('IPC bridge', () => {
     let ipcDir: string;
     let wsA: string;
     let wsB: string;
+    let elsewhere: string;
     let windows: IPCServer[];
 
     setup(() => {
@@ -38,13 +41,14 @@ suite('IPC bridge', () => {
         process.env.BLACKBOX_IPC_DIR = ipcDir;
         wsA = tmpDir('bbx-wsA-');
         wsB = tmpDir('bbx-wsB-');
+        elsewhere = tmpDir('bbx-else-');
         windows = [];
     });
 
     teardown(() => {
         windows.forEach(w => w.dispose());
         delete process.env.BLACKBOX_IPC_DIR;
-        for (const d of [ipcDir, wsA, wsB]) {
+        for (const d of [ipcDir, wsA, wsB, elsewhere]) {
             fs.rmSync(d, { recursive: true, force: true });
         }
     });
@@ -56,7 +60,8 @@ suite('IPC bridge', () => {
         return w;
     }
 
-    const who = (cwd: string) => callExtension('whoami', {}, { timeoutMs: 2000, cwd }).then(r => r.result);
+    const sessionAt = (cwd: string) => new BridgeSession({ listWindows, send: callExtension, cwd, env: {} });
+    const who = (cwd: string) => sessionAt(cwd).call({ tool: 'whoami', args: {}, timeoutMs: 2000 }).then(r => r.resp.result);
 
     test('routes each call to the window that owns the cwd', async () => {
         await open('A', wsA);
@@ -71,7 +76,7 @@ suite('IPC bridge', () => {
         b.dispose();
         assert.ok(fs.existsSync(a.socketPath), 'window A socket must survive window B closing');
         assert.strictEqual(await who(wsA), 'A');
-        // A call from B's folder falls back to the remaining window.
+        // A is now the only window, so it serves any cwd.
         assert.strictEqual(await who(wsB), 'A');
     });
 
@@ -99,9 +104,9 @@ suite('IPC bridge', () => {
     });
 
     test('survives a client that hangs up before the reply', async () => {
-        await open('A', wsA);
+        const a = await open('A', wsA);
         await assert.rejects(
-            callExtension('slow', {}, { timeoutMs: 50, cwd: wsA }),
+            callExtension(a.socketPath, { tool: 'slow', args: {}, timeoutMs: 50 }),
             (err: any) => err.code === 'ETIMEDOUT',
         );
         await sleep(400); // Let the handler finish and try to write.
@@ -110,7 +115,7 @@ suite('IPC bridge', () => {
 
     test('returns handler errors as errors', async () => {
         await open('A', wsA);
-        const resp = await callExtension('boom', {}, { timeoutMs: 2000, cwd: wsA });
+        const { resp } = await sessionAt(wsA).call({ tool: 'boom', args: {}, timeoutMs: 2000 });
         assert.strictEqual(resp.error, 'kaboom');
     });
 
@@ -125,7 +130,7 @@ suite('IPC bridge', () => {
         assert.ok(!fs.existsSync(path.join(ipcDir, 'dead.json')));
     });
 
-    test('end to end through the MCP stdio server', async function () {
+    test('end to end: an AI session outside any project picks its window', async function () {
         this.timeout(15000);
         await open('A', wsA);
         const b = await open('B', wsB);
@@ -134,54 +139,70 @@ suite('IPC bridge', () => {
         const transport = new StdioClientTransport({
             command: process.execPath,
             args: [path.resolve(__dirname, '../../mcp/server.js')],
-            cwd: wsB,
+            cwd: elsewhere,
             env: { ...process.env, BLACKBOX_IPC_DIR: ipcDir } as Record<string, string>,
         });
         const client = new Client({ name: 'test', version: '0.0.0' });
         await client.connect(transport);
+        const call = (name: string, args: Record<string, unknown> = {}): Promise<any> => client.callTool({ name, arguments: args });
         try {
-            const ok: any = await client.callTool({ name: 'debug_list_breakpoints', arguments: {} });
-            assert.strictEqual(ok.content[0].text, 'breakpoints from B');
-            assert.ok(!ok.isError);
+            assert.match(client.getInstructions() ?? '', /ide_list_windows/);
 
-            // Window A has no such handler: the error must be flagged.
-            windows.forEach(w => w.dispose());
-            windows = [];
-            await open('A', wsA);
-            const bad: any = await client.callTool({ name: 'debug_list_breakpoints', arguments: {} });
-            assert.strictEqual(bad.isError, true);
-            assert.match(bad.content[0].text, /unknown tool/);
+            const ambiguous = await call('debug_list_breakpoints');
+            assert.strictEqual(ambiguous.isError, true);
+            assert.match(ambiguous.content[0].text, /ide_select_window/);
+            assert.match(ambiguous.content[0].text, /window A/);
+            assert.match(ambiguous.content[0].text, /window B/);
+
+            const listed = JSON.parse((await call('ide_list_windows')).content[0].text);
+            assert.deepStrictEqual(listed.map((w: any) => w.window).sort(), ['A', 'B']);
+            assert.ok(listed.every((w: any) => w.reachable && !w.selected && !w.matchesCwd));
+
+            const selected = await call('ide_select_window', { window: path.basename(wsB) });
+            assert.ok(!selected.isError, selected.content[0].text);
+
+            const ok = await call('debug_list_breakpoints');
+            assert.ok(!ok.isError);
+            assert.strictEqual(ok.content[0].text, `[window: ${path.basename(wsB)}]\nbreakpoints from B`);
+
+            // The pinned window closes: fail clearly instead of using A.
+            b.dispose();
+            const gone = await call('debug_list_breakpoints');
+            assert.strictEqual(gone.isError, true);
+            assert.match(gone.content[0].text, /no longer running/);
         } finally {
             await client.close();
         }
     });
 });
 
-suite('pickWindow', () => {
-    const entry = (id: string, folders: string[], focusedAt = 0): RegistryEntry =>
-        ({ id, pid: process.pid, socket: `/x/${id}`, folders, startedAt: 0, focusedAt });
+suite('matchWindows / findWindows', () => {
+    const entry = (id: string, folders: string[]): RegistryEntry =>
+        ({ id, pid: process.pid, socket: `/x/${id}`, folders, startedAt: 0, focusedAt: 0 });
+    const ids = (entries: RegistryEntry[]) => entries.map(e => e.id).sort();
 
     test('prefers the deepest containing folder', () => {
-        const picked = pickWindow([entry('outer', ['/proj']), entry('inner', ['/proj/app'])], '/proj/app/src');
-        assert.strictEqual(picked?.id, 'inner');
+        assert.deepStrictEqual(ids(matchWindows([entry('outer', ['/proj']), entry('inner', ['/proj/app'])], '/proj/app/src')), ['inner']);
     });
 
     test('does not match sibling folders sharing a prefix', () => {
-        const picked = pickWindow([entry('a', ['/proj-a'], 1), entry('b', ['/proj'], 0)], '/proj-a2');
-        assert.strictEqual(picked?.id, 'a', 'falls back to most recently focused');
+        assert.deepStrictEqual(ids(matchWindows([entry('a', ['/proj-a']), entry('b', ['/proj'])], '/proj-a2')), []);
     });
 
-    test('matches a window opened on a subfolder of cwd', () => {
-        const picked = pickWindow([entry('other', ['/elsewhere'], 9), entry('sub', ['/proj/app'])], '/proj');
-        assert.strictEqual(picked?.id, 'sub');
+    test('matches windows opened on sub-folders of the directory', () => {
+        const all = [entry('x', ['/sites/x']), entry('y', ['/sites/y']), entry('z', ['/other'])];
+        assert.deepStrictEqual(ids(matchWindows(all, '/sites')), ['x', 'y']);
     });
 
-    test('falls back to the most recently focused window', () => {
-        const picked = pickWindow([entry('old', ['/a'], 1), entry('new', ['/b'], 2)], '/c');
-        assert.strictEqual(picked?.id, 'new');
+    test('returns every window sharing the deepest folder', () => {
+        assert.deepStrictEqual(ids(matchWindows([entry('a', ['/proj']), entry('b', ['/proj'])], '/proj/src')), ['a', 'b']);
     });
 
-    test('returns undefined with no windows', () => {
-        assert.strictEqual(pickWindow([], '/c'), undefined);
+    test('finds a window by id, path or folder name', () => {
+        const all = [entry('1', ['/sites/wpcore.wpx']), entry('2', ['/sites/manheim.wpx'])];
+        assert.deepStrictEqual(ids(findWindows(all, '2')), ['2']);
+        assert.deepStrictEqual(ids(findWindows(all, '/sites/wpcore.wpx/wp')), ['1']);
+        assert.deepStrictEqual(ids(findWindows(all, 'Manheim.WPX')), ['2']);
+        assert.deepStrictEqual(ids(findWindows(all, 'nope')), []);
     });
 });

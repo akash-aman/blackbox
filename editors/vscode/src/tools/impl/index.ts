@@ -4,3 +4,4 @@ export { stepOver, stepInto, stepOut, restartDebug } from './debug';
 export { evaluate, getVariables, getStackTrace, getLaunchConfigs, inspect, watch } from './debug';
 export { openFile, getOpenFiles } from './editor';
 export { findFile, getDiagnostics } from './workspace';
+export { getWindowStatus, workspaceFolderPaths } from './window';

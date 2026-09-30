@@ -3,6 +3,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { callExtension } from '../ipc/client';
 import { listWindows } from '../ipc/registry';
+import { RegistryEntry } from '../ipc/protocol';
+import { BridgeSession, RoutingError, windowLabel } from './session';
+
+// Resolved from out/mcp/ at runtime; outside tsc's rootDir, so not imported.
+const { version } = require('../../package.json') as { version: string };
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -17,27 +22,68 @@ const TIMEOUT_MS: Record<string, number> = {
     workspace_find_file: 30_000,
 };
 
+const INSTRUCTIONS = `Blackbox controls debuggers in running VS Code windows. Several windows may be open at once.
+Calls go to the window whose folder contains this server's working directory, or to the only open window.
+If a call fails because the window is ambiguous or missing, or you are unsure which window you are using, call ide_list_windows, then ide_select_window with the window you want.`;
+
+const session = new BridgeSession({ listWindows, send: callExtension, cwd: process.cwd(), env: process.env });
+
 function txt(text: string, isError = false) { return { content: [{ type: 'text' as const, text }], isError }; }
 
-function describeWindows(): string {
-    const windows = listWindows();
+function formatWindows(windows: readonly RegistryEntry[]): string {
     if (windows.length === 0) {
-        return 'No VS Code window with the Blackbox extension is running.';
+        return 'No windows are running.';
     }
-    return 'Running windows:\n' + windows.map(w => `- pid ${w.pid}: ${w.folders.join(', ') || '(no folder)'}`).join('\n');
+    return 'Windows:\n' + windows.map(w => `- ${windowLabel(w)} (window ${w.id}): ${w.folders.join(', ') || '(no folder)'}`).join('\n');
+}
+
+function formatRoutingError(err: RoutingError) {
+    const hint = err.code === 'NO_WINDOWS'
+        ? 'Open the project in VS Code with the Blackbox extension enabled.'
+        : 'Call ide_select_window with one of these windows.';
+    return txt(`${err.message}\n\n${formatWindows(err.candidates)}\n\n${hint}`, true);
+}
+
+function formatFailure(err: unknown) {
+    if (err instanceof RoutingError) {
+        return formatRoutingError(err);
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return txt(`Could not reach VS Code: ${msg}`, true);
 }
 
 async function run(tool: string, args: Record<string, unknown> = {}) {
     try {
-        const resp = await callExtension(tool, args, { timeoutMs: TIMEOUT_MS[tool] ?? DEFAULT_TIMEOUT_MS });
-        return resp.error ? txt('Error: ' + resp.error, true) : txt(resp.result || '');
+        const { route, resp } = await session.call({ tool, args, timeoutMs: TIMEOUT_MS[tool] ?? DEFAULT_TIMEOUT_MS });
+        // Name the window only when there is more than one to confuse.
+        const prefix = route.window && route.windowCount > 1 ? `[window: ${windowLabel(route.window)}]\n` : '';
+        return resp.error ? txt(prefix + 'Error: ' + resp.error, true) : txt(prefix + (resp.result || ''));
     } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return txt(`Could not reach VS Code: ${msg}\n\nMCP server cwd: ${process.cwd()}\n${describeWindows()}`, true);
+        return formatFailure(err);
     }
 }
 
-const server = new McpServer({ name: 'blackbox', version: '0.1.0' });
+const server = new McpServer({ name: 'blackbox', version }, { instructions: INSTRUCTIONS });
+
+// ── Windows ─────────────────────────────────────────────────────
+
+server.registerTool('ide_list_windows', {
+    description: 'List the VS Code windows Blackbox can control: their folders, which one this session uses, and each debugger\'s state (running, or stopped at file:line). Use it to choose a window before debugging when several are open.',
+}, async () => txt(JSON.stringify(await session.describe(), null, 2)));
+
+server.registerTool('ide_select_window', {
+    description: 'Choose the VS Code window this session controls, by window id, folder path or folder name from ide_list_windows. Omit window to go back to automatic selection by working directory.',
+    inputSchema: { window: z.string().optional().describe('Window id, absolute folder path, or folder name (e.g. "wpcore.wpx")') },
+}, async ({ window }) => {
+    try {
+        const selected = session.select(window);
+        return txt(selected
+            ? `Selected ${windowLabel(selected)} (window ${selected.id}): ${selected.folders.join(', ')}`
+            : 'Selection cleared; windows are chosen by working directory again.');
+    } catch (err: unknown) {
+        return formatFailure(err);
+    }
+});
 
 const bpSchema = z.object({ file: z.string(), line: z.number(), condition: z.string().optional(), logMessage: z.string().optional() });
 

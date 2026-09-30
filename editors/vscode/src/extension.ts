@@ -2,23 +2,18 @@ import * as vscode from 'vscode';
 import { registerAllTools } from './tools';
 import { IPCServer } from './ipc/server';
 import { registerIPCHandlers } from './ipc/handlers';
-
-function workspaceFolders(): string[] {
-    return (vscode.workspace.workspaceFolders ?? [])
-        .filter(f => f.uri.scheme === 'file')
-        .map(f => f.uri.fsPath);
-}
+import { workspaceFolderPaths } from './tools/impl';
 
 export async function activate(context: vscode.ExtensionContext) {
     // Register languageModelTools for # references in chat.
     registerAllTools(context);
 
     // Start this window's IPC server for the MCP stdio bridge.
-    const ipc = new IPCServer({ folders: workspaceFolders() });
+    const ipc = new IPCServer({ folders: workspaceFolderPaths() });
     registerIPCHandlers(ipc);
     context.subscriptions.push(
         ipc,
-        vscode.workspace.onDidChangeWorkspaceFolders(() => ipc.setFolders(workspaceFolders())),
+        vscode.workspace.onDidChangeWorkspaceFolders(() => ipc.setFolders(workspaceFolderPaths())),
         vscode.window.onDidChangeWindowState(state => { if (state.focused) { ipc.markFocused(); } }),
     );
 

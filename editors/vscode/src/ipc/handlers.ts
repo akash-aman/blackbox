@@ -3,6 +3,7 @@
 
 import { IPCServer } from './server';
 import * as impl from '../tools/impl';
+import { STATUS_TOOL } from './protocol';
 
 export function registerIPCHandlers(ipc: IPCServer) {
 
@@ -37,4 +38,7 @@ export function registerIPCHandlers(ipc: IPCServer) {
     // ── Workspace ───────────────────────────────────────────────
     ipc.register('workspace_find_file', async (args) => impl.findFile(args as any));
     ipc.register('workspace_get_diagnostics', async (args) => impl.getDiagnostics(args as any));
+
+    // ── Bridge ──────────────────────────────────────────────────
+    ipc.register(STATUS_TOOL, async () => impl.getWindowStatus());
 }
