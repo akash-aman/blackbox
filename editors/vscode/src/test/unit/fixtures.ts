@@ -23,3 +23,8 @@ export function makeEntry(id: string, folders: string[], overrides: Partial<Regi
         ...overrides,
     };
 }
+
+// For behaviour that exists only on macOS/Linux: permission bits, socket
+// files, chmod. On Windows the code skips these checks (named pipes, per-user
+// %TEMP%), so the tests are skipped there too.
+export const unixOnly = (title: string, fn: Mocha.Func | Mocha.AsyncFunc) => (process.platform === 'win32' ? test.skip(title, fn) : test(title, fn));

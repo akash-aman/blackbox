@@ -5,7 +5,7 @@ import { registerIPCHandlers } from './ipc/handlers';
 import { workspaceFolderPaths, setEventHub } from './tools/impl';
 import * as path from 'path';
 import { DebugEventHub } from './tools/impl/events';
-import { LAUNCHER_NAME, blackboxHome, recordInstall } from './launcher/blackboxMcp';
+import { LAUNCHER_NAME, blackboxHome, findNode, recordInstall } from './launcher/blackboxMcp';
 
 export async function activate(context: vscode.ExtensionContext) {
     // Watch debug adapter traffic so tools can wait for stops and read output.
@@ -57,17 +57,20 @@ export function deactivate() {
 // so MCP configs don't need a version-specific path.
 function registerLauncher(context: vscode.ExtensionContext) {
     const out = path.join(context.extensionPath, 'out');
-    try {
-        recordInstall(
-            { version: String(context.extension.packageJSON.version), server: path.join(out, 'mcp', 'server.js'), app: vscode.env.appName },
-            path.join(out, 'launcher', 'blackboxMcp.js'),
-        );
-    } catch (err: unknown) {
-        console.error('blackbox: could not update the MCP launcher:', err);
+    // A build run from source (F5) must not become the server MCP clients use.
+    if (context.extensionMode !== vscode.ExtensionMode.Development) {
+        try {
+            recordInstall(
+                { version: String(context.extension.packageJSON.version), server: path.join(out, 'mcp', 'server.js'), app: vscode.env.appName },
+                path.join(out, 'launcher', 'blackboxMcp.js'),
+            );
+        } catch (err: unknown) {
+            console.error('blackbox: could not update the MCP launcher:', err);
+        }
     }
 
     context.subscriptions.push(vscode.commands.registerCommand('blackbox.copyMcpConfig', async () => {
-        const config = { blackbox: { command: 'node', args: [path.join(blackboxHome(), LAUNCHER_NAME)] } };
+        const config = { blackbox: { command: findNode(), args: [path.join(blackboxHome(), LAUNCHER_NAME)] } };
         await vscode.env.clipboard.writeText(JSON.stringify(config, null, 2));
         vscode.window.showInformationMessage('Blackbox MCP server configuration copied. Add it under "mcpServers" (or "servers" for VS Code mcp.json).');
     }));

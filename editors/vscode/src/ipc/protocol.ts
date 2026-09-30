@@ -11,6 +11,7 @@
 // The MCP server reads the registry to pick the window that owns its
 // working directory (see registry.ts).
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -110,9 +111,12 @@ export function isPrivateDir(dir: string): boolean {
     }
 }
 
+// Windows named pipes share one namespace across all users, so the name
+// gets an unguessable part: only the private registry file reveals it, and
+// no other user can create it ahead of a window.
 export function socketPath(id: string): string {
     if (process.platform === 'win32') {
-        return `\\\\.\\pipe\\blackbox-${id}`;
+        return `\\\\.\\pipe\\blackbox-${id}-${crypto.randomBytes(12).toString('hex')}`;
     }
     return path.join(ipcDir(), `${id}.sock`);
 }

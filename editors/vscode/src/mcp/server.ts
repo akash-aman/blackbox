@@ -31,12 +31,18 @@ Calls go to the window whose folder contains this server's working directory; ti
 If a call fails because the window is ambiguous or missing, or you are unsure which window you are using, call ide_list_windows, then ide_select_window with the window you want.
 Typical loop: debug_get_launch_configs, debug_start {configName}, debug_set_breakpoint, trigger the code, debug_wait_for_stop, then step/inspect; read logpoints and program output with debug_get_output.`;
 
+// Computes a value on first use, then reuses it.
+function once<T>(compute: () => T): () => T {
+    let value: { v: T } | undefined;
+    return () => (value ??= { v: compute() }).v;
+}
+
 const session = new BridgeSession({
     listWindows,
     send: callExtension,
     cwd: process.cwd(),
     env: process.env,
-    ancestors: ancestorPids(),
+    ancestors: once(() => ancestorPids()),
 });
 
 function txt(text: string, isError = false) { return { content: [{ type: 'text' as const, text }], isError }; }

@@ -41,6 +41,7 @@ function ensurePrivateDir(dir: string) {
 
 export class IPCServer {
     private server: net.Server | null = null;
+    private readonly connections = new Set<net.Socket>();
     private handlers = new Map<string, ToolHandler>();
     private healthTimer: NodeJS.Timeout | null = null;
     private socketIno: number | null = null;
@@ -107,8 +108,7 @@ export class IPCServer {
         if (this.healthTimer) {
             clearInterval(this.healthTimer);
         }
-        this.server?.close();
-        this.server = null;
+        this.closeServer();
         this.unlinkOwnSocket();
         try { fs.unlinkSync(registryPath(this.entry.id)); } catch { /* ignore */ }
     }
@@ -164,8 +164,7 @@ export class IPCServer {
         console.warn(`blackbox IPC: ${this.entry.socket} went missing, restarting listener`);
         this.restarting = true;
         try {
-            this.server?.close();
-            this.server = null;
+            this.closeServer();
             await this.listen();
         } catch (err) {
             console.error('blackbox IPC: failed to restart listener:', err);
@@ -188,7 +187,18 @@ export class IPCServer {
         }
     }
 
+    // Stops listening and drops open connections, so the address is free at
+    // once (a Windows named pipe stays taken while connections are open).
+    private closeServer() {
+        this.server?.close();
+        this.server = null;
+        this.connections.forEach(socket => socket.destroy());
+        this.connections.clear();
+    }
+
     private handleConnection(socket: net.Socket) {
+        this.connections.add(socket);
+        socket.on('close', () => this.connections.delete(socket));
         // The client may hang up (e.g. on timeout) before we reply.
         socket.on('error', () => { /* ignore */ });
 

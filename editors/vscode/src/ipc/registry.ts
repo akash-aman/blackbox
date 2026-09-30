@@ -2,8 +2,16 @@
 // which extension host a tool call should go to.
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { RegistryEntry, UNKNOWN_APP, ipcDir, isPrivateDir } from './protocol';
+
+// A window's socket disappears with it. Checking it too catches entries
+// whose pid was reused by another process. Named pipes (Windows) aren't
+// files, so there only the pid is checked.
+function socketExists(socket: string): boolean {
+    return process.platform === 'win32' || fs.existsSync(socket);
+}
 
 function isAlive(pid: number): boolean {
     try {
@@ -42,7 +50,7 @@ function readDir(dir: string): RegistryEntry[] {
         } catch {
             continue; // Partially written or foreign file.
         }
-        if (!isAlive(entry.pid)) {
+        if (!isAlive(entry.pid) || !socketExists(entry.socket)) {
             try { fs.unlinkSync(file); } catch { /* ignore */ }
             try { fs.unlinkSync(entry.socket); } catch { /* ignore */ }
             continue;
@@ -65,6 +73,10 @@ function normalize(p: string): string {
     return process.platform === 'linux' ? resolved : resolved.toLowerCase();
 }
 
+function isTooBroad(dir: string): boolean {
+    return dir === path.parse(dir).root || dir === normalize(os.homedir());
+}
+
 function contains(folder: string, target: string): boolean {
     return target === folder || target.startsWith(folder.endsWith(path.sep) ? folder : folder + path.sep);
 }
@@ -83,6 +95,11 @@ export function matchWindows(entries: readonly RegistryEntry[], dir: string): Re
 
     if (deepest !== NO_MATCH) {
         return entries.filter((_, i) => depths[i] === deepest);
+    }
+    // Every project is "inside" / or the home folder, which says nothing
+    // about which one is meant (e.g. an agent started with cwd "/").
+    if (isTooBroad(target)) {
+        return [];
     }
     return entries.filter((_, i) => folders[i].some(f => contains(target, f)));
 }

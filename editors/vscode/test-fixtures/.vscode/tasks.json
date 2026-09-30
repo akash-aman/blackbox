@@ -2,6 +2,7 @@
     // Used by the "Fixture (stalled)" launch configuration in src/test/suite/loop.test.ts.
     "version": "2.0.0",
     "tasks": [
-        { "label": "wait forever", "type": "shell", "command": "sleep 600", "problemMatcher": [] }
+        // A process task: no shell, so it behaves the same on Windows (PowerShell) and elsewhere.
+        { "label": "wait forever", "type": "process", "command": "node", "args": ["-e", "setInterval(function () {}, 1000)"], "problemMatcher": [] }
     ]
 }

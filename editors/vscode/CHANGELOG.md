@@ -4,6 +4,17 @@ All notable changes to the Blackbox VS Code extension. Each version is also a [G
 
 Releases are published by pushing a `vscode-v<version>` tag; CI refuses to release a version without an entry here. Changes collect under `## Unreleased`; at release time that heading becomes `## <version> (Pre-release) — <date>` (leave out `(Pre-release)` for a stable release).
 
+## 0.5.1 — 2026-09-30
+
+- **Launcher can't be downgraded:** `~/.blackbox/blackbox-mcp.js` now records which version wrote it. An editor with an older Blackbox leaves a newer launcher alone; a rollback replaces it once the newer install is gone.
+- **No lost install records:** each install keeps its own file in `~/.blackbox/installs/`, so windows of several editors starting at once can't overwrite each other. The 0.5.0 `installs.json` is still read.
+- Builds run from source (F5) are no longer recorded as the server MCP clients use.
+- **Copy MCP Server Configuration** writes the absolute path of your `node` (found through your login shell), since apps started from the Dock often don't have nvm's `node` on their PATH.
+- A working directory of `/` or your home folder no longer counts as containing every project. When nothing matches, the editor the session was started from decides if it has one window (e.g. Antigravity's agent, which starts with cwd `/`).
+- A registry entry whose socket is gone is treated as dead, so a reused process id can't make a closed window look alive.
+- **Windows:** the MCP server starts without waiting for a slow PowerShell process lookup (now done only when needed); named pipe names include a random part, so other users can't claim a window's pipe first; a closing window frees its pipe at once.
+- CI runs the tests on Linux, macOS and Windows before every release.
+
 ## 0.5.0 — 2026-09-30
 
 - **First stable release.** Until now every version was a pre-release, so a normal install, or "Switch to Release Version" in Antigravity and other Open VSX editors, found no version to install.

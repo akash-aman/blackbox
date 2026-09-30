@@ -3,6 +3,7 @@
 
 import * as assert from 'assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { ChildProcess, spawn } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -12,13 +13,14 @@ import { callExtension } from '../../ipc/client';
 import { listWindows, matchWindows, findWindows } from '../../ipc/registry';
 import { PROTOCOL_VERSION, RegistryEntry, STATUS_TOOL, WindowStatus } from '../../ipc/protocol';
 import { BridgeSession } from '../../mcp/session';
-import { CURSOR, CURSOR_MAIN_PID, makeEntry } from './fixtures';
+import { CURSOR, CURSOR_MAIN_PID, makeEntry, unixOnly } from './fixtures';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 function tmpDir(prefix: string): string {
     // Keep socket paths short: macOS limits them to 104 bytes.
-    return fs.realpathSync(fs.mkdtempSync(path.join('/tmp', prefix)));
+    const base = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    return fs.realpathSync(fs.mkdtempSync(path.join(base, prefix)));
 }
 
 // Fake windows report a separate live process as their pid, so a spawned MCP
@@ -69,7 +71,7 @@ suite('IPC bridge', () => {
         return w;
     }
 
-    const sessionAt = (cwd: string) => new BridgeSession({ listWindows, send: callExtension, cwd, env: {}, ancestors: [] });
+    const sessionAt = (cwd: string) => new BridgeSession({ listWindows, send: callExtension, cwd, env: {}, ancestors: () => [] });
     const who = (cwd: string) => sessionAt(cwd).call({ tool: 'whoami', args: {}, timeoutMs: 2000 }).then(r => r.resp.result);
 
     test('routes each call to the window that owns the cwd', async () => {
@@ -97,7 +99,7 @@ suite('IPC bridge', () => {
         assert.strictEqual(await who(wsA), 'A2');
     });
 
-    test('recreates its socket if the file is deleted', async () => {
+    unixOnly('recreates its socket if the file is deleted', async () => {
         const a = await open('A', wsA, { healthCheckMs: 50 });
         fs.unlinkSync(a.socketPath);
         await sleep(200);
@@ -149,19 +151,28 @@ suite('IPC bridge', () => {
 
     test('reads entries from older extensions with defaults', async () => {
         const old = { id: 'old', pid: windowOwner.pid, socket: path.join(ipcDir, 'old.sock'), folders: [wsA], startedAt: 0, focusedAt: 0 };
+        fs.writeFileSync(old.socket, ''); // Stands in for the window's live socket.
         fs.writeFileSync(path.join(ipcDir, 'old.json'), JSON.stringify(old));
         const [entry] = listWindows();
         assert.strictEqual(entry.protocol, 1);
         assert.strictEqual(entry.app.name, 'unknown (older extension)');
     });
 
-    test('tightens its own IPC directory if other users could reach it', async () => {
+    unixOnly('treats an entry whose socket is gone as dead, even if its pid is alive (pid reuse)', async () => {
+        const ghost = makeEntry('ghost', [wsA], { pid: windowOwner.pid!, socket: path.join(ipcDir, 'ghost.sock') });
+        fs.writeFileSync(path.join(ipcDir, 'ghost.json'), JSON.stringify(ghost));
+        await open('B', wsB);
+        assert.deepStrictEqual(listWindows().map(w => w.id), ['B']);
+        assert.ok(!fs.existsSync(path.join(ipcDir, 'ghost.json')), 'the stale entry is removed');
+    });
+
+    unixOnly('tightens its own IPC directory if other users could reach it', async () => {
         fs.chmodSync(ipcDir, 0o755);
         await open('A', wsA);
         assert.strictEqual(fs.statSync(ipcDir).mode & 0o777, 0o700);
     });
 
-    test('refuses an IPC directory that is a symlink', async () => {
+    unixOnly('refuses an IPC directory that is a symlink', async () => {
         const real = tmpDir('bbx-real-');
         const link = path.join(elsewhere, 'ipc');
         fs.symlinkSync(real, link);
@@ -174,7 +185,7 @@ suite('IPC bridge', () => {
         }
     });
 
-    test('ignores registry entries in a directory other users can write', async () => {
+    unixOnly('ignores registry entries in a directory other users can write', async () => {
         await open('A', wsA);
         fs.chmodSync(ipcDir, 0o777);
         try {

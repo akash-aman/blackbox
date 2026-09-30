@@ -2,7 +2,7 @@
     "name": "blackbox-debug",
     "displayName": "Blackbox",
     "description": "AI-driven debugging — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via MCP tools.",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "publisher": "akash-cx",
     "license": "MIT",
     "icon": "assets/logo-128.png",
@@ -854,7 +854,7 @@
         "watch": "tsc -watch -p ./",
         "lint": "eslint src --ext ts",
         "test": "node ./out/test/runTest.js",
-        "test:unit": "mocha --ui tdd 'out/test/unit/**/*.test.js'",
+        "test:unit": "mocha --ui tdd \"out/test/unit/**/*.test.js\"",
         "sync:tools": "node scripts/sync-chat-tools.js"
     },
     "devDependencies": {

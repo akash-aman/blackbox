@@ -54,14 +54,18 @@ suite('Debug Tools', () => {
         const home = process.env.BLACKBOX_HOME!;
         assert.ok(home && !home.startsWith(require('os').homedir() + '/.blackbox'), 'tests use a temporary BLACKBOX_HOME');
         const ext = vscode.extensions.getExtension('akash-cx.blackbox-debug')!;
-        const installs = JSON.parse(fs.readFileSync(require('path').join(home, 'installs.json'), 'utf8'));
-        assert.ok(installs.some((r: { server: string; version: string }) =>
-            r.server === require('path').join(ext.extensionPath, 'out/mcp/server.js') && r.version === ext.packageJSON.version), JSON.stringify(installs));
-        assert.ok(fs.existsSync(require('path').join(home, 'blackbox-mcp.js')));
+        const dir = require('path').join(home, 'installs');
+        const installs = fs.readdirSync(dir).map(name => JSON.parse(fs.readFileSync(require('path').join(dir, name), 'utf8')));
+        const expected = require('path').join(ext.extensionPath, 'out', 'mcp', 'server.js');
+        const same = (a: string) => process.platform === 'win32' ? a.toLowerCase() === expected.toLowerCase() : a === expected;
+        assert.ok(installs.some((r: { server: string; version: string }) => same(r.server) && r.version === ext.packageJSON.version), JSON.stringify(installs));
+        const launcher = fs.readFileSync(require('path').join(home, 'blackbox-mcp.js'), 'utf8');
+        assert.ok(launcher.startsWith(`// blackbox-mcp launcher v${ext.packageJSON.version} from `), launcher.split('\n', 1)[0]);
 
         await vscode.commands.executeCommand('blackbox.copyMcpConfig');
         const copied = JSON.parse(await vscode.env.clipboard.readText());
         assert.deepStrictEqual(copied.blackbox.args, [require('path').join(home, 'blackbox-mcp.js')]);
+        assert.ok(copied.blackbox.command === 'node' || require('path').isAbsolute(copied.blackbox.command), copied.blackbox.command);
     });
 
     test('breakpoints API should be available', () => {

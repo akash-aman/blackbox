@@ -22,18 +22,18 @@ defaults:
     working-directory: editors/vscode
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       vsix: ${{ steps.meta.outputs.vsix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Check version, tag and changelog
         id: meta
@@ -43,7 +43,7 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version (expected vscode-v$version)"
             exit 1
           fi
-          node scripts/release-notes.js "$version" > release-notes.md
+          node scripts/release-notes.js "$version" > /dev/null
           prerelease=$(node scripts/release-notes.js "$version" --prerelease)
           {
             echo "version=$version"
@@ -52,8 +52,23 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Releasing $version (pre-release: $prerelease)"
 
+  test:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Retry once: npm's cache occasionally races on Windows runners (EEXIST).
       - name: Install dependencies
-        run: npm ci
+        run: npm ci || (npm cache clean --force && npm ci)
 
       - name: Compile
         run: npm run compile
@@ -61,21 +76,42 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
-      - name: VS Code tests
+      # macOS is covered by local development runs.
+      - name: VS Code tests (Linux)
+        if: runner.os == 'Linux'
         run: xvfb-run -a npm test
 
-      - name: Package extension
-        run: npx @vscode/vsce package ${{ steps.meta.outputs.prerelease == 'true' && '--pre-release' || '' }} -o ${{ steps.meta.outputs.vsix }}
+      - name: VS Code tests (Windows)
+        if: runner.os == 'Windows'
+        run: npm test
 
-      - uses: actions/upload-artifact@v4
+  build:
+    needs: [ check, test ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package extension
+        run: |
+          node scripts/release-notes.js "${{ needs.check.outputs.version }}" > release-notes.md
+          npx @vscode/vsce package ${{ needs.check.outputs.prerelease == 'true' && '--pre-release' || '' }} -o ${{ needs.check.outputs.vsix }}
+
+      - uses: actions/upload-artifact@v7
         with:
           name: blackbox-vsix
           path: |
-            editors/vscode/${{ steps.meta.outputs.vsix }}
+            editors/vscode/${{ needs.check.outputs.vsix }}
             editors/vscode/release-notes.md
 
   github-release:
-    needs: build
+    needs: [ check, build ]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -84,56 +120,56 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: blackbox-vsix
 
       - name: Create GitHub Release
         run: >
-          gh release create "$GITHUB_REF_NAME" "${{ needs.build.outputs.vsix }}"
+          gh release create "$GITHUB_REF_NAME" "${{ needs.check.outputs.vsix }}"
           --repo "$GITHUB_REPOSITORY" --verify-tag
-          --title "Blackbox for VS Code ${{ needs.build.outputs.version }}"
+          --title "Blackbox for VS Code ${{ needs.check.outputs.version }}"
           --notes-file release-notes.md
-          ${{ needs.build.outputs.prerelease == 'true' && '--prerelease' || '--latest' }}
+          ${{ needs.check.outputs.prerelease == 'true' && '--prerelease' || '--latest' }}
         env:
           GH_TOKEN: ${{ github.token }}
 
   publish-vscode:
-    needs: [ build, github-release ]
+    needs: [ check, github-release ]
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: .
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: blackbox-vsix
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Publish to VS Code Marketplace
-        run: npx @vscode/vsce publish --packagePath "${{ needs.build.outputs.vsix }}" ${{ needs.build.outputs.prerelease == 'true' && '--pre-release' || '' }}
+        run: npx @vscode/vsce publish --packagePath "${{ needs.check.outputs.vsix }}" ${{ needs.check.outputs.prerelease == 'true' && '--pre-release' || '' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
   publish-openvsx:
-    needs: [ build, github-release ]
+    needs: [ check, github-release ]
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: .
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: blackbox-vsix
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Publish to Open VSX Registry
-        run: npx ovsx publish "${{ needs.build.outputs.vsix }}" ${{ needs.build.outputs.prerelease == 'true' && '--pre-release' || '' }}
+        run: npx ovsx publish "${{ needs.check.outputs.vsix }}" ${{ needs.check.outputs.prerelease == 'true' && '--pre-release' || '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}

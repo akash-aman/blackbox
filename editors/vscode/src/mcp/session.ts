@@ -7,7 +7,8 @@
 //   2. The pinned window (same id, or same folders after a reload).
 //   3. The single window matching cwd (or BLACKBOX_WORKSPACE).
 //   4. Several match: the one the AI was launched from (window, then editor).
-//   5. None match: the window the AI was launched from, or the only window.
+//   5. None match: the window the AI was launched from, else the launching
+//      editor's only window, else the only window.
 // Anything else is a RoutingError; the session never guesses.
 
 import * as path from 'path';
@@ -57,7 +58,9 @@ export interface SessionDeps {
     send: Send;
     cwd: string;
     env: NodeJS.ProcessEnv;
-    ancestors: readonly number[]; // This MCP server's parent processes, nearest first.
+    // This MCP server's parent processes, nearest first. Read only when needed:
+    // it can take a second (PowerShell on Windows).
+    ancestors: () => readonly number[];
 }
 
 // Folder name, plus the editor when windows from several editors are running.
@@ -90,7 +93,7 @@ export class BridgeSession {
     }
 
     private launch(windows: readonly RegistryEntry[]): LaunchInfo {
-        return detectLaunch(windows, this.deps.ancestors, this.deps.env);
+        return detectLaunch(windows, this.deps.ancestors(), this.deps.env);
     }
 
     resolve(): Route {
@@ -135,8 +138,13 @@ export class BridgeSession {
             throw new RoutingError('AMBIGUOUS', `Several editor windows match ${this.dir}.`, matches);
         }
 
-        // Nothing matches cwd, so it can't point anywhere else.
-        const fallback = launch.window ?? (windows.length === 1 ? windows[0] : undefined);
+        // Nothing matches cwd, so it can't point anywhere else: use the
+        // launching window, else the launching editor's only window, else
+        // the only window.
+        const editorWindows = launch.appPid !== undefined ? windows.filter(w => w.appPid === launch.appPid) : [];
+        const fallback = launch.window
+            ?? (editorWindows.length === 1 ? editorWindows[0] : undefined)
+            ?? (windows.length === 1 ? windows[0] : undefined);
         if (fallback) {
             return fallback;
         }

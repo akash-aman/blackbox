@@ -12,7 +12,8 @@ suite('sameFile', () => {
         try {
             fs.mkdirSync(path.join(root, 'src'));
             fs.writeFileSync(path.join(root, 'src', 'index.php'), '<?php');
-            fs.symlinkSync(path.join(root, 'src'), path.join(root, 'wp'));
+            // A junction on Windows: directory links there need no admin rights.
+            fs.symlinkSync(path.join(root, 'src'), path.join(root, 'wp'), 'junction');
             assert.ok(sameFile(path.join(root, 'wp', 'index.php'), path.join(root, 'src', 'index.php')));
             assert.ok(!sameFile(path.join(root, 'wp', 'index.php'), path.join(root, 'src', 'other.php')));
         } finally {

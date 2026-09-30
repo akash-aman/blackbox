@@ -26,7 +26,7 @@ function harness(initial: RegistryEntry[], cwd: string, env: NodeJS.ProcessEnv =
         }
         return { id: '0', result: socket } as IPCResponse;
     };
-    const session = new BridgeSession({ listWindows: () => windows, send, cwd, env, ancestors });
+    const session = new BridgeSession({ listWindows: () => windows, send, cwd, env, ancestors: () => ancestors });
     return { session, sent, setWindows: (w: RegistryEntry[]) => { windows = w; } };
 }
 
@@ -212,6 +212,23 @@ suite('BridgeSession with several editors', () => {
         assertRouting(() => session.resolve(), 'PIN_GONE');
         setWindows([VS, entry('5001', ['/sites/wpcore.wpx'], 3, { pid: 5001, app: CURSOR, appPid: CURSOR_MAIN_PID })]);
         assert.strictEqual(session.resolve().window?.id, '5001');
+    });
+
+    test('from / (an agent started with cwd "/"), the launching editor\'s only window is used', () => {
+        const { session } = harness([VS, CU, OTHER], '/', {}, [7001, 86045, CURSOR_MAIN_PID]);
+        assert.strictEqual(session.resolve().window?.id, '5000');
+    });
+
+    test('/ and the home folder are not folder matches', () => {
+        const { session } = harness([VS, OTHER], '/');
+        assertRouting(() => session.resolve(), 'AMBIGUOUS', ['4416', '6000']);
+        const home = harness([VS, OTHER], require('os').homedir());
+        assertRouting(() => home.session.resolve(), 'AMBIGUOUS', ['4416', '6000']);
+    });
+
+    test('the launching editor with several windows still has to ask', () => {
+        const { session } = harness([VS, entry('4417', ['/sites/other'], 0, { pid: 4417 }), CU], '/', {}, [7001, 961, VSCODE_MAIN_PID]);
+        assertRouting(() => session.resolve(), 'AMBIGUOUS');
     });
 
     test('describe reports editor, launch origin and outdated windows', async () => {
