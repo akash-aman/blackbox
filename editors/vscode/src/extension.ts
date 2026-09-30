@@ -3,7 +3,9 @@ import { registerChatTools } from './tools/chat';
 import { IPCServer } from './ipc/server';
 import { registerIPCHandlers } from './ipc/handlers';
 import { workspaceFolderPaths, setEventHub } from './tools/impl';
+import * as path from 'path';
 import { DebugEventHub } from './tools/impl/events';
+import { LAUNCHER_NAME, blackboxHome, recordInstall } from './launcher/blackboxMcp';
 
 export async function activate(context: vscode.ExtensionContext) {
     // Watch debug adapter traffic so tools can wait for stops and read output.
@@ -34,6 +36,8 @@ export async function activate(context: vscode.ExtensionContext) {
     terminalEnv.description = 'Lets AI tools started here use this window through Blackbox';
     terminalEnv.replace('BLACKBOX_WINDOW', ipc.id);
 
+    registerLauncher(context);
+
     try {
         await ipc.start();
     } catch (err: unknown) {
@@ -47,4 +51,24 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
     // IPC server cleanup handled via context.subscriptions
+}
+
+// Keeps ~/.blackbox/blackbox-mcp.js pointing at the newest installed server,
+// so MCP configs don't need a version-specific path.
+function registerLauncher(context: vscode.ExtensionContext) {
+    const out = path.join(context.extensionPath, 'out');
+    try {
+        recordInstall(
+            { version: String(context.extension.packageJSON.version), server: path.join(out, 'mcp', 'server.js'), app: vscode.env.appName },
+            path.join(out, 'launcher', 'blackboxMcp.js'),
+        );
+    } catch (err: unknown) {
+        console.error('blackbox: could not update the MCP launcher:', err);
+    }
+
+    context.subscriptions.push(vscode.commands.registerCommand('blackbox.copyMcpConfig', async () => {
+        const config = { blackbox: { command: 'node', args: [path.join(blackboxHome(), LAUNCHER_NAME)] } };
+        await vscode.env.clipboard.writeText(JSON.stringify(config, null, 2));
+        vscode.window.showInformationMessage('Blackbox MCP server configuration copied. Add it under "mcpServers" (or "servers" for VS Code mcp.json).');
+    }));
 }

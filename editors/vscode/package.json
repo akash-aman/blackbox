@@ -2,7 +2,7 @@
     "name": "blackbox-debug",
     "displayName": "Blackbox",
     "description": "AI-driven debugging — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via MCP tools.",
-    "version": "0.4.1",
+    "version": "0.5.0",
     "publisher": "akash-cx",
     "license": "MIT",
     "icon": "assets/logo-128.png",
@@ -838,6 +838,13 @@
                         }
                     }
                 }
+            }
+        ],
+        "commands": [
+            {
+                "command": "blackbox.copyMcpConfig",
+                "title": "Copy MCP Server Configuration",
+                "category": "Blackbox"
             }
         ]
     },

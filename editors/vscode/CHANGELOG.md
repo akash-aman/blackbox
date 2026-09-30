@@ -4,6 +4,14 @@ All notable changes to the Blackbox VS Code extension. Each version is also a [G
 
 Releases are published by pushing a `vscode-v<version>` tag; CI refuses to release a version without an entry here. Changes collect under `## Unreleased`; at release time that heading becomes `## <version> (Pre-release) — <date>` (leave out `(Pre-release)` for a stable release).
 
+## 0.5.0 — 2026-09-30
+
+- **First stable release.** Until now every version was a pre-release, so a normal install, or "Switch to Release Version" in Antigravity and other Open VSX editors, found no version to install.
+- **Version-independent MCP launcher:** every activation, in any editor, records its install and keeps `~/.blackbox/blackbox-mcp.js` up to date. Point MCP clients at `node ~/.blackbox/blackbox-mcp.js`; it starts the newest installed Blackbox server, so configs no longer break when an editor updates the extension. New command **Blackbox: Copy MCP Server Configuration** copies a ready-to-paste entry.
+- Messages say "editor window" instead of "VS Code window", since windows can be Cursor, Antigravity and other VS Code-based editors.
+- A selected window that reloads is found again only in the same editor. Before, with a project open in two editors, reloading the selected Antigravity window could silently switch the session to the VS Code window with the same folder.
+- `debug_run_to_line` reports `reachedTarget` correctly when the file is given through a symlink (e.g. WordPress `wp/` pointing at `wordpress-develop/src/`).
+
 ## 0.4.1 (Pre-release) — 2026-09-30
 
 - `debug_start` no longer hangs when the editor is waiting on a prompt before starting the debugger (saving unsaved files first because of `debug.saveBeforeStart`, a pre-launch task, a picker). After 20s it returns an explanation, naming any unsaved untitled files, and says to answer the prompt and then call `debug_wait_for_stop`.

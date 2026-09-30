@@ -22,7 +22,7 @@
 
 [Blackbox](https://blackbox.xcode.cx/) works seamlessly with any Debug Adapter Protocol (DAP) compatible debugger, including PHP, Node.js, Python, Go, C/C++, Java, and more. 
 
-> **Pre-release** — This extension is under active development. Install the pre-release version to get the latest features.
+> Works in VS Code and VS Code-based editors such as Cursor and Antigravity.
 >
 > What's new in each version: [CHANGELOG](CHANGELOG.md) · [GitHub Releases](https://github.com/akash-aman/blackbox/releases).
 
@@ -76,34 +76,36 @@ Blackbox exposes debugging tools to AI models through two transport paths:
 
 ## 🛠️ MCP Server Configuration
 
+Once the extension has run in any editor window, it keeps a launcher at `~/.blackbox/blackbox-mcp.js` that always starts the newest installed Blackbox server. Point your MCP client at it, and the config keeps working when the extension updates. The command **Blackbox: Copy MCP Server Configuration** copies the entry with your path filled in.
+
+Claude Code, Cursor, Antigravity and other clients using `mcpServers`:
+
 ```json
 {
-  "servers": {
+  "mcpServers": {
     "blackbox": {
-      "type": "stdio",
       "command": "node",
-      "args": [
-        "/Users/<user>/.vscode/extensions/akash-cx.blackbox-debug-<version>/out/mcp/server.js"
-      ]
+      "args": ["/Users/<user>/.blackbox/blackbox-mcp.js"]
     }
   }
 }
 ```
 
-- Example: if the user is on MacOS is akashaman and version of blackbox is 0.1.0 then the path will be: 
+VS Code (`mcp.json`):
+
 ```json
 {
   "servers": {
     "blackbox": {
       "type": "stdio",
       "command": "node",
-      "args": [
-        "/Users/akashaman/.vscode/extensions/akash-cx.blackbox-debug-0.1.0/out/mcp/server.js"
-      ]
+      "args": ["/Users/<user>/.blackbox/blackbox-mcp.js"]
     }
   }
 }
 ```
+
+On Windows the launcher is `C:\Users\<user>\.blackbox\blackbox-mcp.js`. Older configs pointing at `…/extensions/akash-cx.blackbox-debug-<version>/out/mcp/server.js` still work until that version is removed.
 
 ### Multiple windows and editors
 

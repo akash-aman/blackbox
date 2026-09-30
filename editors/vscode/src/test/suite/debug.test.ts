@@ -50,6 +50,20 @@ suite('Debug Tools', () => {
         assert.deepStrictEqual(Object.keys(TOOLS).sort(), [...declared].sort());
     });
 
+    test('activation records the install and installs the MCP launcher', async () => {
+        const home = process.env.BLACKBOX_HOME!;
+        assert.ok(home && !home.startsWith(require('os').homedir() + '/.blackbox'), 'tests use a temporary BLACKBOX_HOME');
+        const ext = vscode.extensions.getExtension('akash-cx.blackbox-debug')!;
+        const installs = JSON.parse(fs.readFileSync(require('path').join(home, 'installs.json'), 'utf8'));
+        assert.ok(installs.some((r: { server: string; version: string }) =>
+            r.server === require('path').join(ext.extensionPath, 'out/mcp/server.js') && r.version === ext.packageJSON.version), JSON.stringify(installs));
+        assert.ok(fs.existsSync(require('path').join(home, 'blackbox-mcp.js')));
+
+        await vscode.commands.executeCommand('blackbox.copyMcpConfig');
+        const copied = JSON.parse(await vscode.env.clipboard.readText());
+        assert.deepStrictEqual(copied.blackbox.args, [require('path').join(home, 'blackbox-mcp.js')]);
+    });
+
     test('breakpoints API should be available', () => {
         assert.ok(vscode.debug.breakpoints !== undefined, 'debug.breakpoints not available');
         assert.ok(Array.isArray(vscode.debug.breakpoints), 'breakpoints should be an array');

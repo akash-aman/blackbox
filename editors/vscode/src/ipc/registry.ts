@@ -1,4 +1,4 @@
-// Discovery of running VS Code windows. Used by the MCP server to decide
+// Discovery of running editor windows (VS Code, Cursor, Antigravity, ...). Used by the MCP server to decide
 // which extension host a tool call should go to.
 
 import * as fs from 'fs';

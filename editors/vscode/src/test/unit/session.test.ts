@@ -204,6 +204,16 @@ suite('BridgeSession with several editors', () => {
         assert.strictEqual(windowLabel(OLD, [VS, CU, OLD]), 'old');
     });
 
+    test('a pinned window that reloads is found in its own editor, not another with the same folder', () => {
+        // The case seen live: wpcore.wpx open in VS Code and Antigravity, Antigravity reloads.
+        const { session, setWindows } = harness([VS, CU], '/Users/me');
+        session.select('wpcore.wpx', 'Cursor');
+        setWindows([VS]); // Reloading: the old window is gone, the new one not registered yet.
+        assertRouting(() => session.resolve(), 'PIN_GONE');
+        setWindows([VS, entry('5001', ['/sites/wpcore.wpx'], 3, { pid: 5001, app: CURSOR, appPid: CURSOR_MAIN_PID })]);
+        assert.strictEqual(session.resolve().window?.id, '5001');
+    });
+
     test('describe reports editor, launch origin and outdated windows', async () => {
         const OLD = entry('7000', ['/sites/old'], 0, { protocol: 1 });
         const { session } = harness([VS, CU, OLD], '/Users/me', {}, [7001, 5000, CURSOR_MAIN_PID]);

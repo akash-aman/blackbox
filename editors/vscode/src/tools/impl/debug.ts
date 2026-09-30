@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import { DebugEvents, OutputQuery, StopEvent, WaitResult } from './debugEvents';
+import { sameFile } from '../../util/paths';
 
 const STEP_WAIT_MS = 10_000;
 const PAUSE_WAIT_MS = 5_000;
@@ -635,7 +636,7 @@ export async function runToLine(args: { file: string; line: number; timeoutMs?: 
         await session.customRequest('continue', { threadId: await resolveThread(session, args.threadId) });
         const result = await wait(args.timeoutMs ?? DEFAULT_STOP_WAIT_MS);
         const report = JSON.parse(await describeWait(result));
-        report.reachedTarget = report.state === 'stopped' && report.line === args.line && report.file === args.file;
+        report.reachedTarget = report.state === 'stopped' && report.line === args.line && sameFile(report.file, args.file);
         return JSON.stringify(report, null, 2);
     } finally {
         if (!existing) { await changeBreakpoints(() => vscode.debug.removeBreakpoints([temporary])); }

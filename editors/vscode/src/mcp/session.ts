@@ -104,9 +104,11 @@ export class BridgeSession {
         return { socket: target.socket, window: target, windows };
     }
 
-    // A reloaded window gets a new id, so fall back to matching its folders.
+    // A reloaded window gets a new id, so fall back to the window with the
+    // same folders in the same editor (never another editor's window).
     private pinned(windows: RegistryEntry[], pin: RegistryEntry): RegistryEntry {
-        const target = windows.find(w => w.id === pin.id) ?? windows.find(w => sameFolders(w.folders, pin.folders));
+        const target = windows.find(w => w.id === pin.id)
+            ?? windows.find(w => w.app.name === pin.app.name && sameFolders(w.folders, pin.folders));
         if (!target) {
             throw new RoutingError('PIN_GONE', `The selected window (${windowLabel(pin, windows)}) is no longer running.`, windows);
         }
@@ -115,7 +117,7 @@ export class BridgeSession {
 
     private automatic(windows: RegistryEntry[]): RegistryEntry {
         if (windows.length === 0) {
-            throw new RoutingError('NO_WINDOWS', 'No VS Code window with the Blackbox extension is running.', []);
+            throw new RoutingError('NO_WINDOWS', 'No editor window with the Blackbox extension is running.', []);
         }
         const matches = matchWindows(windows, this.dir);
         if (matches.length === 1) {
@@ -130,7 +132,7 @@ export class BridgeSession {
             if (chosen) {
                 return chosen;
             }
-            throw new RoutingError('AMBIGUOUS', `Several VS Code windows match ${this.dir}.`, matches);
+            throw new RoutingError('AMBIGUOUS', `Several editor windows match ${this.dir}.`, matches);
         }
 
         // Nothing matches cwd, so it can't point anywhere else.
@@ -138,7 +140,7 @@ export class BridgeSession {
         if (fallback) {
             return fallback;
         }
-        throw new RoutingError('AMBIGUOUS', `No VS Code window has ${this.dir} open.`, windows);
+        throw new RoutingError('AMBIGUOUS', `No editor window has ${this.dir} open.`, windows);
     }
 
     // Pins a window for this session; no ref returns to automatic routing.
@@ -151,10 +153,10 @@ export class BridgeSession {
         const found = findWindows(windows, ref, app);
         const target = app ? `"${ref}" in ${app}` : `"${ref}"`;
         if (found.length === 0) {
-            throw new RoutingError('NOT_FOUND', `No VS Code window matches ${target}.`, windows);
+            throw new RoutingError('NOT_FOUND', `No editor window matches ${target}.`, windows);
         }
         if (found.length > 1) {
-            throw new RoutingError('AMBIGUOUS', `Several VS Code windows match ${target}.`, found);
+            throw new RoutingError('AMBIGUOUS', `Several editor windows match ${target}.`, found);
         }
         this.pin = found[0];
         return found[0];
