@@ -1,20 +1,21 @@
-name: Publish VS Code Extension
+name: Release VS Code Extension
+
+# Release: bump editors/vscode/package.json, add a CHANGELOG.md entry, merge,
+# then push a tag `vscode-v<version>`. This checks the tag, version and
+# changelog agree, runs the tests, packages the .vsix once, creates the
+# GitHub Release (notes from CHANGELOG.md, .vsix attached), and publishes
+# that same .vsix to the VS Code Marketplace and Open VSX.
+#
+# Run it by hand ("Run workflow") to check a branch: it builds, tests and
+# packages, but never releases or publishes.
 
 on:
-  release:
-    types: [ published ]
+  push:
+    tags: [ 'vscode-v*' ]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Dry run (package only, no publish)"
-        required: false
-        default: false
-        type: boolean
-      pre_release:
-        description: "Publish as pre-release"
-        required: false
-        default: true
-        type: boolean
+
+permissions:
+  contents: read
 
 defaults:
   run:
@@ -23,12 +24,33 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      vsix: ${{ steps.meta.outputs.vsix }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Check version, tag and changelog
+        id: meta
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "vscode-v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version (expected vscode-v$version)"
+            exit 1
+          fi
+          node scripts/release-notes.js "$version" > release-notes.md
+          prerelease=$(node scripts/release-notes.js "$version" --prerelease)
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "vsix=blackbox-debug-$version.vsix"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $version (pre-release: $prerelease)"
 
       - name: Install dependencies
         run: npm ci
@@ -39,61 +61,65 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
-      - name: Determine pre-release flag
-        id: flags
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.pre_release }}" == "true" ]]; then
-            echo "pre_release=--pre-release" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "release" && "${{ github.event.release.prerelease }}" == "true" ]]; then
-            echo "pre_release=--pre-release" >> "$GITHUB_OUTPUT"
-          else
-            echo "pre_release=" >> "$GITHUB_OUTPUT"
-          fi
+      - name: VS Code tests
+        run: xvfb-run -a npm test
 
       - name: Package extension
-        run: npx @vscode/vsce package ${{ steps.flags.outputs.pre_release }}
+        run: npx @vscode/vsce package ${{ steps.meta.outputs.prerelease == 'true' && '--pre-release' || '' }} -o ${{ steps.meta.outputs.vsix }}
 
-      - name: Upload .vsix artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: blackbox-vsix
-          path: editors/vscode/*.vsix
+          path: |
+            editors/vscode/${{ steps.meta.outputs.vsix }}
+            editors/vscode/release-notes.md
+
+  github-release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: blackbox-vsix
+
+      - name: Create GitHub Release
+        run: >
+          gh release create "$GITHUB_REF_NAME" "${{ needs.build.outputs.vsix }}"
+          --repo "$GITHUB_REPOSITORY" --verify-tag
+          --title "Blackbox for VS Code ${{ needs.build.outputs.version }}"
+          --notes-file release-notes.md
+          ${{ needs.build.outputs.prerelease == 'true' && '--prerelease' || '--latest' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   publish-vscode:
-    needs: build
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch'
-      && inputs.dry_run == false)
+    needs: [ build, github-release ]
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: blackbox-vsix
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Determine pre-release flag
-        id: flags
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.pre_release }}" == "true" ]]; then
-            echo "pre_release=--pre-release" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "release" && "${{ github.event.release.prerelease }}" == "true" ]]; then
-            echo "pre_release=--pre-release" >> "$GITHUB_OUTPUT"
-          else
-            echo "pre_release=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Publish to VS Code Marketplace
-        run: npx @vscode/vsce publish ${{ steps.flags.outputs.pre_release }}
+        run: npx @vscode/vsce publish --packagePath "${{ needs.build.outputs.vsix }}" ${{ needs.build.outputs.prerelease == 'true' && '--pre-release' || '' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
   publish-openvsx:
-    needs: build
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch'
-      && inputs.dry_run == false)
+    needs: [ build, github-release ]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -108,6 +134,6 @@ jobs:
           node-version: 20
 
       - name: Publish to Open VSX Registry
-        run: npx ovsx publish *.vsix
+        run: npx ovsx publish "${{ needs.build.outputs.vsix }}" ${{ needs.build.outputs.prerelease == 'true' && '--pre-release' || '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}

@@ -1,0 +1,7 @@
+{
+    // Used by the "Fixture (stalled)" launch configuration in src/test/suite/loop.test.ts.
+    "version": "2.0.0",
+    "tasks": [
+        { "label": "wait forever", "type": "shell", "command": "sleep 600", "problemMatcher": [] }
+    ]
+}

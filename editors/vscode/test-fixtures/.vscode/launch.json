@@ -8,6 +8,14 @@
             "request": "launch",
             "program": "${workspaceFolder}/app.js",
             "console": "internalConsole"
+        },
+        {
+            // Never starts: its pre-launch task doesn't finish.
+            "name": "Fixture (stalled)",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/app.js",
+            "preLaunchTask": "wait forever"
         }
     ]
 }

@@ -80,10 +80,18 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
     private output: OutputEntry[] = [];
     private outputSeq = 0;
     private stopCounter = 0;
+    private trackCount = 0;
 
     constructor(private readonly maxOutput = 1000) {}
 
+    // Debug adapters created so far; a start that never raises this is stuck
+    // before the adapter exists (e.g. on a prompt in the editor).
+    get adaptersCreated(): number {
+        return this.trackCount;
+    }
+
     track(session: S): TrackerHandlers {
+        this.trackCount++;
         const tracked: Tracked<S> = { session, pendingRequests: new Map(), paused: new Map(), capabilities: {}, ended: false };
         this.sessions.set(session.id, tracked);
         return {

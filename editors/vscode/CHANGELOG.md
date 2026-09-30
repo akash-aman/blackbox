@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.4.0 (Pre-release)
+All notable changes to the Blackbox VS Code extension. Each version is also a [GitHub Release](https://github.com/akash-aman/blackbox/releases) (tag `vscode-v<version>`) with these notes and the packaged `.vsix`.
+
+Releases are published by pushing a `vscode-v<version>` tag; CI refuses to release a version without an entry here. Changes collect under `## Unreleased`; at release time that heading becomes `## <version> (Pre-release) — <date>` (leave out `(Pre-release)` for a stable release).
+
+## Unreleased
+
+- `debug_start` no longer hangs when the editor is waiting on a prompt before starting the debugger (saving unsaved files first because of `debug.saveBeforeStart`, a pre-launch task, a picker). After 20s it returns an explanation, naming any unsaved untitled files, and says to answer the prompt and then call `debug_wait_for_stop`.
+- `debug_start` fails at once in a workspace in Restricted Mode, where the editor disables debugging, instead of waiting.
+
+## 0.4.0 (Pre-release) — 2026-09-30
 
 - **New tools:** `debug_set_function_breakpoint`, `debug_toggle_breakpoints` (enable/disable without removing), `debug_run_to_line` (temporary breakpoint, always removed), `debug_list_threads`, `debug_set_variable` (via the adapter's setVariable or setExpression), `debug_get_source_context`.
 - `hitCondition` on `debug_set_breakpoint`; `functions` on `debug_remove_breakpoint`; function breakpoints and hit conditions in `debug_list_breakpoints`.
@@ -15,7 +24,7 @@
 - Paused threads are tracked per thread, so `debug_list_threads` marks every paused PHP request, not just the latest.
 - The old shared `/tmp/blackbox/` folder is no longer read; windows on 0.2.0 or older need the update to be seen.
 
-## 0.3.0 (Pre-release)
+## 0.3.0 (Pre-release) — 2026-09-30
 
 - **Several editors:** windows record their editor (VS Code, Cursor, Antigravity, …), version and extension version. `ide_list_windows` shows them, `ide_select_window` accepts `app`, and labels name the editor when several are running.
 - **Launch-aware routing:** when the same project is open in several windows, calls go to the window the AI was started from (chat panel or integrated terminal via `BLACKBOX_WINDOW`), then to windows of the launching editor.
@@ -28,21 +37,30 @@
 - Adding or removing breakpoints waits for the debug adapter to confirm, so a following continue can't hit a removed breakpoint.
 - `npm test` works again on current VS Code (`@vscode/test-electron` 3.1).
 
-## 0.2.0 (Pre-release)
+## 0.2.0 (Pre-release) — 2026-09-30
 
 - New MCP tools `ide_list_windows` and `ide_select_window`: an AI session can see every VS Code window, its folders and its debugger state (running, or stopped at file:line), and choose the window it controls.
 - Calls no longer fall back silently to the last-focused window. When the window cannot be chosen from the working directory, the call fails with the list of windows so the AI can select one.
 - A selected window stays selected across reloads; if it closes, calls fail instead of moving to another window.
 - Results name the window (`[window: …]`) when more than one is running.
 
-## 0.1.3 (Pre-release)
+## 0.1.3 (Pre-release) — 2026-09-28
 
 - Fix "IPC connection failed" when more than one VS Code window is open. Each window now has its own socket under `/tmp/blackbox/`, and closing or reloading one window no longer disconnects the others.
 - The MCP server routes each call to the window that owns its working directory, and retries briefly while a window is starting.
 - The bridge recreates its socket if the file is deleted.
 - Tool failures are now reported as MCP errors, and slow tools such as `debug_start` get longer time limits.
 
-## 0.1.0 (Pre-release)
+## 0.1.2 (Pre-release) — 2026-05-04
+
+- README: the MCP server configuration example uses `<user>` and `<version>` placeholders, with a filled-in macOS example.
+
+## 0.1.1 (Pre-release) — 2026-04-25
+
+- README: new overview, features section and logo.
+- Added a Code of Conduct, contributing guidelines and a security policy.
+
+## 0.1.0 (Pre-release) — 2026-04-24
 
 - Initial pre-release
 - 22 MCP tools: breakpoints, session control, stepping, variable inspection, editor navigation, workspace utilities

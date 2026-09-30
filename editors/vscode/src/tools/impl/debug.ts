@@ -10,6 +10,7 @@ const PAUSE_WAIT_MS = 5_000;
 const DEFAULT_STOP_WAIT_MS = 30_000;
 const STOP_FRAMES = 5;
 const BREAKPOINT_SYNC_MS = 1_000;
+const START_PROMPT_MS = 20_000;
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -316,12 +317,46 @@ async function startByName(configName: string, folderPath?: string): Promise<str
         const names = files.flatMap(f => [...f.configurations, ...f.compounds].map(c => c.name)).filter(Boolean);
         throw new Error(`no launch configuration named "${configName}". Available: ${names.join(', ') || '(none)'}`);
     }
-    const started = await vscode.debug.startDebugging(owner.folder, configName);
+    const started = await startWatched(() => vscode.debug.startDebugging(owner.folder, configName));
     if (!started) { throw new Error(`failed to start "${configName}". Is its debug extension installed?`); }
     return `Debug session "${configName}" started from the launch configuration in ${owner.folder.name}`;
 }
 
+// VS Code disables debugging in Restricted Mode and would wait on a trust
+// prompt, so fail fast with the fix instead.
+function assertTrusted() {
+    if (!vscode.workspace.isTrusted) {
+        throw new Error('this workspace is in Restricted Mode, where debugging is disabled. '
+            + 'Trust it in the editor (command "Workspaces: Manage Workspace Trust") and try again.');
+    }
+}
+
+// Starts a session, but gives up with an explanation if the editor hasn't
+// created a debug adapter after a while: it is then waiting on something in
+// the window, most often saving unsaved files first (debug.saveBeforeStart).
+async function startWatched(start: () => Thenable<boolean>): Promise<boolean> {
+    const before = events?.adaptersCreated ?? 0;
+    const started = Promise.resolve(start());
+    let timer: NodeJS.Timeout | undefined;
+    const stalled = new Promise<'stalled'>(resolve => { timer = setTimeout(() => resolve('stalled'), START_PROMPT_MS); });
+    try {
+        const outcome = await Promise.race([started, stalled]);
+        if (outcome !== 'stalled' || (events?.adaptersCreated ?? 0) > before) {
+            return started;
+        }
+    } finally {
+        clearTimeout(timer);
+    }
+    const untitled = vscode.workspace.textDocuments.filter(d => d.isUntitled && d.isDirty).map(d => d.uri.path);
+    throw new Error(`the editor has not started the debugger after ${START_PROMPT_MS / 1000}s. It is probably waiting on a prompt in the window: `
+        + (untitled.length > 0
+            ? `saving the unsaved file(s) ${untitled.join(', ')} before debugging (setting "debug.saveBeforeStart"), `
+            : 'saving unsaved files before debugging (setting "debug.saveBeforeStart"), ')
+        + 'a pre-launch task, or a picker. Answer it there (or save or close those files); the session then starts, so call debug_wait_for_stop rather than starting again.');
+}
+
 export async function startDebug(args: Record<string, unknown>): Promise<string> {
+    assertTrusted();
     if (typeof args.configName === 'string' && args.configName) {
         return startByName(args.configName, args.folder as string | undefined);
     }
@@ -331,7 +366,7 @@ export async function startDebug(args: Record<string, unknown>): Promise<string>
     if (!request) { return 'Error: "request" is required (launch or attach)'; }
     const config: vscode.DebugConfiguration = { ...args, type, request, name: (args.name as string) || 'Debug (' + type + ')' };
     const folder = vscode.workspace.workspaceFolders?.[0];
-    const started = await vscode.debug.startDebugging(folder, config);
+    const started = await startWatched(() => vscode.debug.startDebugging(folder, config));
     if (!started) { return 'Error: failed to start ' + type + ' debug session. Is the ' + type + ' debug extension installed?'; }
     return 'Debug session "' + config.name + '" started (type: ' + type + ', request: ' + request + ')';
 }

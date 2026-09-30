@@ -23,6 +23,7 @@ async function call(tool: string, args: Record<string, unknown> = {}, timeoutMs 
 const callJson = async (tool: string, args: Record<string, unknown> = {}, timeoutMs?: number) => JSON.parse(await call(tool, args, timeoutMs));
 
 suite('Debug loop (Node fixture)', () => {
+
     suiteTeardown(async () => {
         await vscode.debug.stopDebugging();
         vscode.debug.removeBreakpoints([...vscode.debug.breakpoints]);
@@ -36,7 +37,7 @@ suite('Debug loop (Node fixture)', () => {
             { file: FIXTURE, line: LOGPOINT_LINE, logMessage: 'logpoint total={total}' },
         ] });
 
-        assert.match(await call('debug_start', { configName: 'Fixture' }), /started/);
+        assert.match(await call('debug_start', { configName: 'Fixture' }, 60_000), /started/);
 
         const hit = await callJson('debug_wait_for_stop', { timeoutMs: 30_000 }, 35_000);
         assert.strictEqual(hit.state, 'stopped', JSON.stringify(hit));
@@ -81,7 +82,7 @@ suite('Debug loop (Node fixture)', () => {
         vscode.debug.removeBreakpoints([...vscode.debug.breakpoints]);
 
         await call('debug_set_breakpoint', { file: FIXTURE, line: BREAKPOINT_LINE, hitCondition: '2' });
-        await call('debug_start', { configName: 'Fixture' });
+        await call('debug_start', { configName: 'Fixture' }, 60_000);
         const hit = await callJson('debug_wait_for_stop', { timeoutMs: 30_000 }, 35_000);
         assert.strictEqual(hit.line, BREAKPOINT_LINE, JSON.stringify(hit));
         assert.strictEqual((await callJson('debug_evaluate', { expression: 'i' })).result, '2', 'hit condition skips the first pass');
@@ -120,5 +121,16 @@ suite('Debug loop (Node fixture)', () => {
         assert.strictEqual((await callJson('debug_wait_for_stop', { timeoutMs: 20_000 }, 25_000)).state, 'terminated');
         const out = (await callJson('debug_get_output', { match: 'total 102' })).entries;
         assert.strictEqual(out.length, 1, 'the changed variable reached the program output');
+    });
+
+    test('a start held up in the editor fails with an explanation instead of hanging', async function () {
+        this.timeout(60_000);
+        const started = Date.now();
+        try {
+            await assert.rejects(call('debug_start', { configName: 'Fixture (stalled)' }, 40_000), /has not started the debugger after 20s.*pre-launch task/);
+            assert.ok(Date.now() - started < 30_000, 'answers within the stall limit');
+        } finally {
+            vscode.tasks.taskExecutions.forEach(execution => execution.terminate());
+        }
     });
 });

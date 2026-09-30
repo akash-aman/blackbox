@@ -1,0 +1,6 @@
+{
+    // Earlier suites leave unsaved untitled documents open. With the default
+    // setting VS Code would ask where to save them before every debug start,
+    // and nobody answers that dialog in a test run.
+    "debug.saveBeforeStart": "none"
+}

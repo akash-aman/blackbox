@@ -23,6 +23,8 @@
 [Blackbox](https://blackbox.xcode.cx/) works seamlessly with any Debug Adapter Protocol (DAP) compatible debugger, including PHP, Node.js, Python, Go, C/C++, Java, and more. 
 
 > **Pre-release** — This extension is under active development. Install the pre-release version to get the latest features.
+>
+> What's new in each version: [CHANGELOG](CHANGELOG.md) · [GitHub Releases](https://github.com/akash-aman/blackbox/releases).
 
 Made with ❤️ by [Akash Aman](https://linktr.ee/akash_aman)
 
