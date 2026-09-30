@@ -62,7 +62,8 @@ interface Tracked<S> {
 const NO_THREAD = -1;
 
 type Listener<S> = (result: WaitResult<S>) => void;
-type ResponseListener = (command: string) => void;
+// command is undefined when the session ended.
+type ResponseListener = (command: string | undefined, sessionId: string) => void;
 
 // Requests after which the program runs until the next stopped event.
 const RESUMING_REQUESTS = new Set(['continue', 'next', 'stepIn', 'stepOut', 'stepBack', 'reverseContinue', 'goto', 'restartFrame']);
@@ -175,27 +176,31 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         });
     }
 
-    // Starts listening for the adapter's response to the next `command`
-    // request from any session. The returned function resolves true when it
-    // arrives, false on timeout, or at once with false if no session is live.
+    // Starts listening for responses to the next `command` request (e.g.
+    // setBreakpoints) from every session live now. The returned function
+    // resolves true once each of them has answered or ended, false on
+    // timeout, and at once with false if no session is live. Waiting for all
+    // matters: js-debug has a parent and a child session, and only the child
+    // runs the program.
     armResponse(command: string): (timeoutMs: number) => Promise<boolean> {
-        if (!this.hasLiveSession()) {
+        const waiting = new Set([...this.sessions.values()].filter(t => !t.ended).map(t => t.session.id));
+        if (waiting.size === 0) {
             return async () => false;
         }
-        let seen = false;
         let deliver: (() => void) | undefined;
-        const listener: ResponseListener = responded => {
-            if (responded !== command) {
-                return;
+        const listener: ResponseListener = (responded, sessionId) => {
+            if (responded === command || responded === undefined) {
+                waiting.delete(sessionId);
             }
-            this.responseListeners.delete(listener);
-            seen = true;
-            deliver?.();
+            if (waiting.size === 0) {
+                this.responseListeners.delete(listener);
+                deliver?.();
+            }
         };
         this.responseListeners.add(listener);
 
         return timeoutMs => new Promise(resolve => {
-            if (seen) {
+            if (waiting.size === 0) {
                 resolve(true);
                 return;
             }
@@ -262,7 +267,7 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         if (command === 'continue' && message.success && message.body?.allThreadsContinued !== false) {
             tracked.paused.clear();
         }
-        [...this.responseListeners].forEach(listener => listener(command));
+        [...this.responseListeners].forEach(listener => listener(command, tracked.session.id));
     }
 
     private onAdapterEvent(tracked: Tracked<S>, event: string, body: any) {
@@ -312,6 +317,7 @@ export class DebugEvents<S extends { readonly id: string; readonly name: string 
         tracked.ended = true;
         tracked.paused.clear();
         this.sessions.delete(tracked.session.id);
+        [...this.responseListeners].forEach(listener => listener(undefined, tracked.session.id));
         if (!this.hasLiveSession()) {
             this.notify({ kind: 'terminated' });
         }

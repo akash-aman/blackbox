@@ -111,13 +111,32 @@ suite('DebugEvents', () => {
         assert.strictEqual(hub.lastStop('p'), undefined);
     });
 
-    test('armResponse resolves when the adapter answers that request', async () => {
-        const { hub, childTracker } = setup();
+    test('armResponse waits until every live session has answered (js-debug parent and child)', async () => {
+        const { hub, parentTracker, childTracker } = setup();
         const synced = hub.armResponse('setBreakpoints');
+        parentTracker.onWillReceiveMessage({ type: 'request', seq: 1, command: 'setBreakpoints' });
         childTracker.onWillReceiveMessage({ type: 'request', seq: 41, command: 'threads' });
         childTracker.onWillReceiveMessage({ type: 'request', seq: 42, command: 'setBreakpoints' });
+        parentTracker.onDidSendMessage({ type: 'response', request_seq: 1, success: true });
         childTracker.onDidSendMessage({ type: 'response', request_seq: 41, success: true });
+        assert.strictEqual(await synced(30), false, 'the child has not answered setBreakpoints yet');
+
+        const again = hub.armResponse('setBreakpoints');
+        parentTracker.onDidSendMessage({ type: 'response', request_seq: 1, success: true });
+        let done = false;
+        const pending = again(1000).then(r => { done = true; return r; });
+        await new Promise(r => setTimeout(r, 20));
+        assert.strictEqual(done, false, 'one answer is not enough');
         childTracker.onDidSendMessage({ type: 'response', request_seq: 42, success: true });
+        assert.strictEqual(await pending, true);
+    });
+
+    test('armResponse stops waiting for a session that ends', async () => {
+        const { hub, parentTracker, childTracker } = setup();
+        const synced = hub.armResponse('setBreakpoints');
+        childTracker.onWillReceiveMessage({ type: 'request', seq: 5, command: 'setBreakpoints' });
+        childTracker.onDidSendMessage({ type: 'response', request_seq: 5, success: true });
+        parentTracker.onExit();
         assert.strictEqual(await synced(1000), true);
     });
 

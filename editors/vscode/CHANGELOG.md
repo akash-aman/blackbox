@@ -8,6 +8,7 @@ Releases are published by pushing a `vscode-v<version>` tag; CI refuses to relea
 
 - `debug_start` no longer hangs when the editor is waiting on a prompt before starting the debugger (saving unsaved files first because of `debug.saveBeforeStart`, a pre-launch task, a picker). After 20s it returns an explanation, naming any unsaved untitled files, and says to answer the prompt and then call `debug_wait_for_stop`.
 - `debug_start` fails at once in a workspace in Restricted Mode, where the editor disables debugging, instead of waiting.
+- Breakpoint changes now wait for every debug session to confirm them, not just the first. With Node (js-debug), the child session that runs the program could miss a breakpoint just added, e.g. by `debug_run_to_line`, and run past it.
 
 ## 0.4.0 (Pre-release) — 2026-09-30
 
