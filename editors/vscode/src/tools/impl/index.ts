@@ -2,6 +2,7 @@ export { setBreakpoint, removeBreakpoint, removeAllBreakpoints, listBreakpoints 
 export { startDebug, stopDebug, continueDebug, pauseDebug } from './debug';
 export { stepOver, stepInto, stepOut, restartDebug } from './debug';
 export { evaluate, getVariables, getStackTrace, getLaunchConfigs, inspect, watch } from './debug';
+export { waitForStop, getOutput, setExceptionBreakpoints, setEventHub } from './debug';
 export { openFile, getOpenFiles } from './editor';
 export { findFile, getDiagnostics } from './workspace';
 export { getWindowStatus, workspaceFolderPaths } from './window';

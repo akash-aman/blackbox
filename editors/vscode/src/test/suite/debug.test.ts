@@ -20,6 +20,10 @@ suite('Debug Tools', () => {
         const self = listWindows().find(w => w.pid === process.pid);
         assert.ok(self, 'No registry entry for this extension host');
         assert.ok(fs.existsSync(self!.socket), 'Socket file missing');
+        assert.strictEqual(self!.app.name, vscode.env.appName);
+        assert.strictEqual(self!.app.scheme, vscode.env.uriScheme);
+        assert.strictEqual(self!.appPid, process.ppid, 'appPid should be the editor main process');
+        assert.strictEqual(self!.extensionVersion, vscode.extensions.getExtension('akash-cx.blackbox-debug')!.packageJSON.version);
     });
 
     test('window status is served over the bridge socket', async () => {

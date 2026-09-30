@@ -4,13 +4,15 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ChildProcess, spawn } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { IPCServer } from '../../ipc/server';
 import { callExtension } from '../../ipc/client';
 import { listWindows, matchWindows, findWindows } from '../../ipc/registry';
-import { RegistryEntry, STATUS_TOOL, WindowStatus } from '../../ipc/protocol';
+import { PROTOCOL_VERSION, RegistryEntry, STATUS_TOOL, WindowStatus } from '../../ipc/protocol';
 import { BridgeSession } from '../../mcp/session';
+import { CURSOR, CURSOR_MAIN_PID, makeEntry } from './fixtures';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -19,8 +21,12 @@ function tmpDir(prefix: string): string {
     return fs.realpathSync(fs.mkdtempSync(path.join('/tmp', prefix)));
 }
 
+// Fake windows report a separate live process as their pid, so a spawned MCP
+// server does not see them as its own ancestor (the chat-panel case).
+let windowOwner: ChildProcess;
+
 function fakeWindow(id: string, folder: string, opts: { healthCheckMs?: number } = {}): IPCServer {
-    const ipc = new IPCServer({ id, folders: [folder], healthCheckMs: opts.healthCheckMs });
+    const ipc = new IPCServer({ id, pid: windowOwner.pid, folders: [folder], healthCheckMs: opts.healthCheckMs });
     const status: WindowStatus = { folders: [folder], focused: false, breakpoints: 0, debug: null };
     ipc.register(STATUS_TOOL, async () => JSON.stringify(status));
     ipc.register('whoami', async () => id);
@@ -30,6 +36,9 @@ function fakeWindow(id: string, folder: string, opts: { healthCheckMs?: number }
 }
 
 suite('IPC bridge', () => {
+    suiteSetup(() => { windowOwner = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' }); });
+    suiteTeardown(() => { windowOwner.kill(); });
+
     let ipcDir: string;
     let wsA: string;
     let wsB: string;
@@ -60,7 +69,7 @@ suite('IPC bridge', () => {
         return w;
     }
 
-    const sessionAt = (cwd: string) => new BridgeSession({ listWindows, send: callExtension, cwd, env: {} });
+    const sessionAt = (cwd: string) => new BridgeSession({ listWindows, send: callExtension, cwd, env: {}, ancestors: [] });
     const who = (cwd: string) => sessionAt(cwd).call({ tool: 'whoami', args: {}, timeoutMs: 2000 }).then(r => r.resp.result);
 
     test('routes each call to the window that owns the cwd', async () => {
@@ -120,14 +129,59 @@ suite('IPC bridge', () => {
     });
 
     test('removes registry entries of dead extension hosts', async () => {
-        const stale: RegistryEntry = {
-            id: 'dead', pid: 2 ** 22 + 1, socket: path.join(ipcDir, 'dead.sock'),
-            folders: [wsA], startedAt: 0, focusedAt: 0,
-        };
+        const stale = makeEntry('dead', [wsA], { pid: 2 ** 22 + 1, socket: path.join(ipcDir, 'dead.sock') });
         fs.writeFileSync(path.join(ipcDir, 'dead.json'), JSON.stringify(stale));
         await open('B', wsB);
         assert.deepStrictEqual(listWindows().map(w => w.id), ['B']);
         assert.ok(!fs.existsSync(path.join(ipcDir, 'dead.json')));
+    });
+
+    test('writes editor, version and protocol into its registry entry', async () => {
+        const w = new IPCServer({ id: 'E', pid: windowOwner.pid, folders: [wsA], app: CURSOR, appPid: CURSOR_MAIN_PID, extensionVersion: '9.9.9' });
+        await w.start();
+        windows.push(w);
+        const [entry] = listWindows();
+        assert.deepStrictEqual(
+            { app: entry.app, appPid: entry.appPid, extensionVersion: entry.extensionVersion, protocol: entry.protocol },
+            { app: CURSOR, appPid: CURSOR_MAIN_PID, extensionVersion: '9.9.9', protocol: PROTOCOL_VERSION },
+        );
+    });
+
+    test('reads entries from older extensions with defaults', async () => {
+        const old = { id: 'old', pid: windowOwner.pid, socket: path.join(ipcDir, 'old.sock'), folders: [wsA], startedAt: 0, focusedAt: 0 };
+        fs.writeFileSync(path.join(ipcDir, 'old.json'), JSON.stringify(old));
+        const [entry] = listWindows();
+        assert.strictEqual(entry.protocol, 1);
+        assert.strictEqual(entry.app.name, 'unknown (older extension)');
+    });
+
+    test('tightens its own IPC directory if other users could reach it', async () => {
+        fs.chmodSync(ipcDir, 0o755);
+        await open('A', wsA);
+        assert.strictEqual(fs.statSync(ipcDir).mode & 0o777, 0o700);
+    });
+
+    test('refuses an IPC directory that is a symlink', async () => {
+        const real = tmpDir('bbx-real-');
+        const link = path.join(elsewhere, 'ipc');
+        fs.symlinkSync(real, link);
+        process.env.BLACKBOX_IPC_DIR = link;
+        try {
+            await assert.rejects(fakeWindow('A', wsA).start(), /not a directory/);
+            assert.deepStrictEqual(listWindows(), []);
+        } finally {
+            fs.rmSync(real, { recursive: true, force: true });
+        }
+    });
+
+    test('ignores registry entries in a directory other users can write', async () => {
+        await open('A', wsA);
+        fs.chmodSync(ipcDir, 0o777);
+        try {
+            assert.deepStrictEqual(listWindows(), [], 'a planted entry must not be trusted');
+        } finally {
+            fs.chmodSync(ipcDir, 0o700);
+        }
     });
 
     test('end to end: an AI session outside any project picks its window', async function () {
@@ -177,8 +231,7 @@ suite('IPC bridge', () => {
 });
 
 suite('matchWindows / findWindows', () => {
-    const entry = (id: string, folders: string[]): RegistryEntry =>
-        ({ id, pid: process.pid, socket: `/x/${id}`, folders, startedAt: 0, focusedAt: 0 });
+    const entry = (id: string, folders: string[]): RegistryEntry => makeEntry(id, folders);
     const ids = (entries: RegistryEntry[]) => entries.map(e => e.id).sort();
 
     test('prefers the deepest containing folder', () => {

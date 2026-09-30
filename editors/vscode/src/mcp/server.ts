@@ -3,8 +3,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { callExtension } from '../ipc/client';
 import { listWindows } from '../ipc/registry';
-import { RegistryEntry } from '../ipc/protocol';
-import { BridgeSession, RoutingError, windowLabel } from './session';
+import { BridgeSession, RoutingError, WindowView, windowLabel } from './session';
+import { ancestorPids } from './launch';
 
 // Resolved from out/mcp/ at runtime; outside tsc's rootDir, so not imported.
 const { version } = require('../../package.json') as { version: string };
@@ -19,32 +19,46 @@ const TIMEOUT_MS: Record<string, number> = {
     debug_get_variables: 30_000,
     debug_inspect: 30_000,
     debug_watch: 30_000,
+    debug_step_over: 30_000,
+    debug_step_into: 30_000,
+    debug_step_out: 30_000,
     workspace_find_file: 30_000,
 };
 
-const INSTRUCTIONS = `Blackbox controls debuggers in running VS Code windows. Several windows may be open at once.
-Calls go to the window whose folder contains this server's working directory, or to the only open window.
-If a call fails because the window is ambiguous or missing, or you are unsure which window you are using, call ide_list_windows, then ide_select_window with the window you want.`;
+const INSTRUCTIONS = `Blackbox controls debuggers in running editor windows (VS Code, Cursor, and other VS Code-based editors). Several windows may be open at once.
+Calls go to the window whose folder contains this server's working directory; ties are broken by the window or editor this session was started from.
+If a call fails because the window is ambiguous or missing, or you are unsure which window you are using, call ide_list_windows, then ide_select_window with the window you want.
+Typical loop: debug_get_launch_configs, debug_start {configName}, debug_set_breakpoint, trigger the code, debug_wait_for_stop, then step/inspect; read logpoints and program output with debug_get_output.`;
 
-const session = new BridgeSession({ listWindows, send: callExtension, cwd: process.cwd(), env: process.env });
+const session = new BridgeSession({
+    listWindows,
+    send: callExtension,
+    cwd: process.cwd(),
+    env: process.env,
+    ancestors: ancestorPids(),
+});
 
 function txt(text: string, isError = false) { return { content: [{ type: 'text' as const, text }], isError }; }
 
-function formatWindows(windows: readonly RegistryEntry[]): string {
-    if (windows.length === 0) {
-        return 'No windows are running.';
-    }
-    return 'Windows:\n' + windows.map(w => `- ${windowLabel(w)} (window ${w.id}): ${w.folders.join(', ') || '(no folder)'}`).join('\n');
+function formatCandidate(view: WindowView, label: string): string {
+    const debug = view.debug ? ` · ${view.debug.type} session ${view.debug.state}` : '';
+    const launched = view.launchedFrom ? ` · this session was started from its ${view.launchedFrom === 'window' ? 'window' : 'editor'}` : '';
+    const outdated = view.outdated ? ' · older extension' : '';
+    return `- ${view.app.name} · ${label} (window ${view.window})${debug}${launched}${outdated}: ${view.folders.join(', ') || '(no folder)'}`;
 }
 
-function formatRoutingError(err: RoutingError) {
+async function formatRoutingError(err: RoutingError) {
     const hint = err.code === 'NO_WINDOWS'
-        ? 'Open the project in VS Code with the Blackbox extension enabled.'
-        : 'Call ide_select_window with one of these windows.';
-    return txt(`${err.message}\n\n${formatWindows(err.candidates)}\n\n${hint}`, true);
+        ? 'Open the project in VS Code (or another VS Code-based editor) with the Blackbox extension enabled.'
+        : 'Call ide_select_window with one of these windows (add "app" to pick an editor).';
+    const views = await session.describe(err.candidates);
+    const list = views.length === 0
+        ? 'No windows are running.'
+        : 'Windows:\n' + views.map((v, i) => formatCandidate(v, windowLabel(err.candidates[i]))).join('\n');
+    return txt(`${err.message}\n\n${list}\n\n${hint}`, true);
 }
 
-function formatFailure(err: unknown) {
+async function formatFailure(err: unknown) {
     if (err instanceof RoutingError) {
         return formatRoutingError(err);
     }
@@ -52,11 +66,11 @@ function formatFailure(err: unknown) {
     return txt(`Could not reach VS Code: ${msg}`, true);
 }
 
-async function run(tool: string, args: Record<string, unknown> = {}) {
+async function run(tool: string, args: Record<string, unknown> = {}, timeoutMs = TIMEOUT_MS[tool] ?? DEFAULT_TIMEOUT_MS) {
     try {
-        const { route, resp } = await session.call({ tool, args, timeoutMs: TIMEOUT_MS[tool] ?? DEFAULT_TIMEOUT_MS });
+        const { route, resp } = await session.call({ tool, args, timeoutMs });
         // Name the window only when there is more than one to confuse.
-        const prefix = route.window && route.windowCount > 1 ? `[window: ${windowLabel(route.window)}]\n` : '';
+        const prefix = route.window && route.windows.length > 1 ? `[window: ${windowLabel(route.window, route.windows)}]\n` : '';
         return resp.error ? txt(prefix + 'Error: ' + resp.error, true) : txt(prefix + (resp.result || ''));
     } catch (err: unknown) {
         return formatFailure(err);
@@ -68,18 +82,21 @@ const server = new McpServer({ name: 'blackbox', version }, { instructions: INST
 // ── Windows ─────────────────────────────────────────────────────
 
 server.registerTool('ide_list_windows', {
-    description: 'List the VS Code windows Blackbox can control: their folders, which one this session uses, and each debugger\'s state (running, or stopped at file:line). Use it to choose a window before debugging when several are open.',
+    description: 'List the editor windows Blackbox can control (VS Code, Cursor, ...): their editor, folders, which one this session uses, whether this session was started from it, and each debugger\'s state (running, or stopped at file:line). Use it to choose a window before debugging when several are open.',
 }, async () => txt(JSON.stringify(await session.describe(), null, 2)));
 
 server.registerTool('ide_select_window', {
-    description: 'Choose the VS Code window this session controls, by window id, folder path or folder name from ide_list_windows. Omit window to go back to automatic selection by working directory.',
-    inputSchema: { window: z.string().optional().describe('Window id, absolute folder path, or folder name (e.g. "wpcore.wpx")') },
-}, async ({ window }) => {
+    description: 'Choose the editor window this session controls, by window id, folder path or folder name from ide_list_windows. Pass app (e.g. "Cursor") when the same folder is open in several editors. Omit window to go back to automatic selection.',
+    inputSchema: {
+        window: z.string().optional().describe('Window id, absolute folder path, or folder name (e.g. "wpcore.wpx")'),
+        app: z.string().optional().describe('Editor name, or part of it, e.g. "Cursor", "Visual Studio Code", "Antigravity"'),
+    },
+}, async ({ window, app }) => {
     try {
-        const selected = session.select(window);
+        const selected = session.select(window, app);
         return txt(selected
-            ? `Selected ${windowLabel(selected)} (window ${selected.id}): ${selected.folders.join(', ')}`
-            : 'Selection cleared; windows are chosen by working directory again.');
+            ? `Selected ${selected.app.name} · ${windowLabel(selected)} (window ${selected.id}): ${selected.folders.join(', ')}`
+            : 'Selection cleared; windows are chosen automatically again.');
     } catch (err: unknown) {
         return formatFailure(err);
     }
@@ -110,8 +127,14 @@ server.registerTool('debug_list_breakpoints', {
 // ── Session Control ─────────────────────────────────────────────
 
 server.registerTool('debug_start', {
-    description: 'Start a debug session utilizing the Debug Adapter Protocol (DAP) for the detected language stack (e.g., Node.js, Python, PHP, Go). Use debug_get_launch_configs FIRST to find existing launch.json configurations to inherit correct ports and mappings. Note for web environments: If the detected stack relies on request-triggered debugging (like Xdebug for PHP), ensure appropriate triggers (e.g., URL parameters like ?XDEBUG_TRIGGER=1 or specific session cookies) are utilized during HTTP requests. Adapt networking logic to the project environment.',
-    inputSchema: { type: z.string().describe('Debug adapter type inferred from workspace: php, node, python, go, cppdbg, java, etc'), request: z.string().describe('launch or attach'), name: z.string().optional(), port: z.number().optional(), program: z.string().optional(), pathMappings: z.record(z.string(), z.string()).optional() },
+    description: 'Start a debug session through the Debug Adapter Protocol (DAP) for the detected language stack (Node.js, Python, PHP, Go, ...). Prefer configName: call debug_get_launch_configs first and pass the name of an existing launch configuration, so its ports, path mappings and adapter settings are used as-is. Otherwise pass type and request (and port, program, pathMappings). Note for web environments: if the stack uses request-triggered debugging (like Xdebug for PHP), trigger it on HTTP requests (e.g. ?XDEBUG_TRIGGER=1 or a session cookie).',
+    inputSchema: {
+        configName: z.string().optional().describe('Name of a launch configuration (or compound) from debug_get_launch_configs'),
+        folder: z.string().optional().describe('Workspace folder path whose launch configuration to use, when several have the same name'),
+        type: z.string().optional().describe('Debug adapter type when not using configName: php, node, python, go, cppdbg, java, etc'),
+        request: z.string().optional().describe('launch or attach, when not using configName'),
+        name: z.string().optional(), port: z.number().optional(), program: z.string().optional(), pathMappings: z.record(z.string(), z.string()).optional(),
+    },
 }, async (args) => run('debug_start', args));
 
 server.registerTool('debug_stop', {
@@ -125,24 +148,29 @@ server.registerTool('debug_restart', {
 // ── Execution Control (play/pause/step) ─────────────────────────
 
 server.registerTool('debug_continue', {
-    description: 'Resume execution after hitting a breakpoint (play button).',
-}, async () => run('debug_continue'));
+    description: 'Resume execution (play button). Does not wait: call debug_wait_for_stop to wait for the next pause.',
+    inputSchema: { threadId: z.number().optional().describe('Thread to act on (default: the paused or focused thread)') },
+}, async (args) => run('debug_continue', args));
 
 server.registerTool('debug_pause', {
-    description: 'Pause a running program (pause button).',
-}, async () => run('debug_pause'));
+    description: 'Pause a running program (pause button) and report where it stopped.',
+    inputSchema: { threadId: z.number().optional().describe('Thread to act on (default: the paused or focused thread)') },
+}, async (args) => run('debug_pause', args));
 
 server.registerTool('debug_step_over', {
-    description: 'Execute the next line, stepping over function calls (step over button).',
-}, async () => run('debug_step_over'));
+    description: 'Execute the next line, stepping over function calls, and report the new location (file, line, function, top frames).',
+    inputSchema: { threadId: z.number().optional().describe('Thread to act on (default: the paused or focused thread)') },
+}, async (args) => run('debug_step_over', args));
 
 server.registerTool('debug_step_into', {
-    description: 'Step into the next function call (step into button).',
-}, async () => run('debug_step_into'));
+    description: 'Step into the next function call and report the new location.',
+    inputSchema: { threadId: z.number().optional().describe('Thread to act on (default: the paused or focused thread)') },
+}, async (args) => run('debug_step_into', args));
 
 server.registerTool('debug_step_out', {
-    description: 'Step out of the current function (step out button).',
-}, async () => run('debug_step_out'));
+    description: 'Step out of the current function and report the new location.',
+    inputSchema: { threadId: z.number().optional().describe('Thread to act on (default: the paused or focused thread)') },
+}, async (args) => run('debug_step_out', args));
 
 // ── Inspection ──────────────────────────────────────────────────
 
@@ -180,6 +208,29 @@ server.registerTool('debug_watch', {
         expressions: z.array(z.string()).optional().describe('Expressions to add/remove matching the active language syntax'),
     },
 }, async (args) => run('debug_watch', args));
+
+server.registerTool('debug_wait_for_stop', {
+    description: 'Wait until the debugger pauses (breakpoint, exception, step, pause) and report where: reason, file, line, function and the top frames. Returns at once if it is already paused. Use after debug_start or debug_continue, or after triggering the code (e.g. an HTTP request with ?XDEBUG_TRIGGER=1). Returns {state:"running"} on timeout, which is not an error: call it again to keep waiting.',
+    inputSchema: { timeoutMs: z.number().optional().describe('How long to wait (default 30000, max 300000)') },
+}, async (args) => {
+    const timeoutMs = Math.min(args.timeoutMs ?? 30_000, 300_000);
+    return run('debug_wait_for_stop', { timeoutMs }, timeoutMs + 5_000);
+});
+
+server.registerTool('debug_get_output', {
+    description: 'Read program output and debug console messages, including logpoint messages from debug_set_breakpoint logMessage. Pass since = nextSince from the previous call to get only new entries; more: true means entries were left out. Long entries are shortened. Use match to filter, since some adapters log their own protocol traffic here.',
+    inputSchema: {
+        since: z.number().optional().describe('Return entries after this sequence number (default 0: everything kept)'),
+        category: z.string().optional().describe('Only this category: stdout, stderr, console, important'),
+        match: z.string().optional().describe('Only entries containing this text (case-insensitive), e.g. "logpoint"'),
+        limit: z.number().optional().describe('Maximum entries (default 200)'),
+    },
+}, async (args) => run('debug_get_output', args));
+
+server.registerTool('debug_set_exception_breakpoints', {
+    description: 'Pause when exceptions are thrown. Call without filters to list the filters the active debug adapter offers (e.g. PHP: Notice, Warning, Exception; Node: all, uncaught), then call with the ones to enable. Pass an empty list to turn them off. Applies to the active session only and is not shown in VS Code\'s Breakpoints panel.',
+    inputSchema: { filters: z.array(z.string()).optional().describe('Filter ids from the list call') },
+}, async (args) => run('debug_set_exception_breakpoints', args));
 
 // ── Editor ──────────────────────────────────────────────────────
 

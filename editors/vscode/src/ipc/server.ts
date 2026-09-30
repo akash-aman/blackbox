@@ -8,7 +8,10 @@
 
 import * as net from 'net';
 import * as fs from 'fs';
-import { IPCRequest, IPCResponse, RegistryEntry, ipcDir, registryPath, socketPath } from './protocol';
+import {
+    AppInfo, IPCRequest, IPCResponse, PROTOCOL_VERSION, RegistryEntry, UNKNOWN_APP,
+    assertPrivateDir, ipcDir, registryPath, socketPath,
+} from './protocol';
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<string>;
 
@@ -17,8 +20,23 @@ const isWindows = process.platform === 'win32';
 
 export interface IPCServerOptions {
     id?: string;
+    pid?: number; // Process that owns the window; defaults to this extension host.
     folders?: string[];
     healthCheckMs?: number;
+    app?: AppInfo;
+    appPid?: number;
+    extensionVersion?: string;
+}
+
+// Creates the IPC directory, or tightens one this user already owns, then
+// refuses to continue if another user could reach it.
+function ensurePrivateDir(dir: string) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const stat = fs.lstatSync(dir);
+    if (stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) !== 0) {
+        fs.chmodSync(dir, 0o700);
+    }
+    assertPrivateDir(dir);
 }
 
 export class IPCServer {
@@ -37,12 +55,20 @@ export class IPCServer {
         const now = Date.now();
         this.entry = {
             id,
-            pid: process.pid,
+            pid: options.pid ?? process.pid,
             socket: socketPath(id),
             folders: options.folders ?? [],
             startedAt: now,
             focusedAt: now,
+            app: options.app ?? UNKNOWN_APP,
+            appPid: options.appPid ?? process.ppid,
+            extensionVersion: options.extensionVersion ?? '',
+            protocol: PROTOCOL_VERSION,
         };
+    }
+
+    get id(): string {
+        return this.entry.id;
     }
 
     get socketPath(): string {
@@ -54,8 +80,10 @@ export class IPCServer {
     }
 
     async start(): Promise<void> {
-        if (!isWindows) {
-            fs.mkdirSync(ipcDir(), { recursive: true, mode: 0o700 });
+        if (isWindows) {
+            fs.mkdirSync(ipcDir(), { recursive: true });
+        } else {
+            ensurePrivateDir(ipcDir());
         }
         await this.listen();
         this.writeRegistry();

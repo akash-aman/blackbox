@@ -1,0 +1,78 @@
+// The AI debugging loop against the built-in Node debugger, driven through
+// this window's bridge socket exactly as the MCP server drives it.
+// Uses test-fixtures/app.js and its "Fixture" launch configuration.
+
+import * as assert from 'assert';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { listWindows } from '../../ipc/registry';
+import { callExtension } from '../../ipc/client';
+
+const FIXTURE = path.resolve(__dirname, '../../../test-fixtures/app.js');
+const BREAKPOINT_LINE = 9;
+const LOGPOINT_LINE = 10;
+const EXCEPTION_LINE = 13;
+
+async function call(tool: string, args: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<string> {
+    const self = listWindows().find(w => w.pid === process.pid)!;
+    const resp = await callExtension(self.socket, { tool, args, timeoutMs });
+    if (resp.error) { throw new Error(`${tool}: ${resp.error}`); }
+    return resp.result ?? '';
+}
+
+const callJson = async (tool: string, args: Record<string, unknown> = {}, timeoutMs?: number) => JSON.parse(await call(tool, args, timeoutMs));
+
+suite('Debug loop (Node fixture)', () => {
+    suiteTeardown(async () => {
+        await vscode.debug.stopDebugging();
+        vscode.debug.removeBreakpoints([...vscode.debug.breakpoints]);
+    });
+
+    test('start by name, wait, step, read logpoints, stop on exceptions', async function () {
+        this.timeout(90_000);
+
+        await call('debug_set_breakpoint', { breakpoints: [
+            { file: FIXTURE, line: BREAKPOINT_LINE },
+            { file: FIXTURE, line: LOGPOINT_LINE, logMessage: 'logpoint total={total}' },
+        ] });
+
+        assert.match(await call('debug_start', { configName: 'Fixture' }), /started/);
+
+        const hit = await callJson('debug_wait_for_stop', { timeoutMs: 30_000 }, 35_000);
+        assert.strictEqual(hit.state, 'stopped', JSON.stringify(hit));
+        assert.strictEqual(hit.reason, 'breakpoint');
+        assert.strictEqual(hit.line, BREAKPOINT_LINE);
+        assert.ok(hit.file.endsWith('app.js'));
+
+        const stepped = await callJson('debug_step_over');
+        assert.strictEqual(stepped.state, 'stopped', JSON.stringify(stepped));
+        assert.strictEqual(stepped.line, LOGPOINT_LINE);
+
+        const filters = await callJson('debug_set_exception_breakpoints');
+        const ids = filters.available.map((f: { filter: string }) => f.filter);
+        assert.ok(ids.includes('all'), `Node filters: ${ids.join(', ')}`);
+        assert.match(await call('debug_set_exception_breakpoints', { filters: ['all'] }), /all/);
+
+        await call('debug_remove_breakpoint', { file: FIXTURE, line: BREAKPOINT_LINE });
+        assert.match(await call('debug_continue'), /debug_wait_for_stop/);
+
+        const thrown = await callJson('debug_wait_for_stop', { timeoutMs: 30_000 }, 35_000);
+        assert.strictEqual(thrown.state, 'stopped', JSON.stringify(thrown));
+        assert.strictEqual(thrown.reason, 'exception', JSON.stringify(thrown));
+        assert.strictEqual(thrown.line, EXCEPTION_LINE);
+
+        const output = await callJson('debug_get_output');
+        const texts = output.entries.map((e: { text: string }) => e.text).join('');
+        assert.match(texts, /logpoint total=1/);
+        assert.match(texts, /logpoint total=3/);
+        assert.ok(output.nextSince > 0);
+
+        assert.match(await call('debug_stop'), /stopped/);
+        const ended = await callJson('debug_wait_for_stop', { timeoutMs: 10_000 }, 15_000);
+        assert.strictEqual(ended.state, 'terminated');
+    });
+
+    test('an unknown launch configuration name lists the available ones', async () => {
+        await assert.rejects(call('debug_start', { configName: 'Nope' }), /Available: Fixture/);
+    });
+});

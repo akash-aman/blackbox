@@ -1,0 +1,13 @@
+{
+    // Used by src/test/suite/loop.test.ts.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Fixture",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/app.js",
+            "console": "internalConsole"
+        }
+    ]
+}

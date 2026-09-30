@@ -39,8 +39,10 @@ Made with ❤️ by [Akash Aman](https://linktr.ee/akash_aman)
 * Batch operations for multiple breakpoints at once.
 
 ### 🐞 Debug Session Control
-* Start, stop, and restart debug sessions for any language.
-* Continue, pause, step over, step into, and step out.
+* Start debug sessions by launch configuration name, or from a type and request; stop and restart them.
+* Wait for the debugger to pause (`debug_wait_for_stop`), and step over, into and out with the new location reported.
+* Pause on exceptions (`debug_set_exception_breakpoints`).
+* Read program output and logpoint messages (`debug_get_output`).
 * Language-agnostic — works with any VS Code debug adapter.
 
 ### 🔍 Variable Inspection
@@ -93,17 +95,18 @@ Blackbox exposes debugging tools to AI models through two transport paths:
 }
 ```
 
-### Multiple VS Code windows
+### Multiple windows and editors
 
-Each VS Code window runs its own Blackbox bridge, and each AI session (Claude CLI, Cursor, …) chooses which window to control:
+Each window of VS Code or a VS Code-based editor (Cursor, Antigravity, …) runs its own Blackbox bridge, and each AI session (Claude CLI, Cursor, …) chooses which window to control:
 
 * **Automatically**: if exactly one window has the folder you started the AI in (or a sub-folder of it) open, or only one window is running, calls go there.
-* **Otherwise the AI chooses**: calls fail with a list of windows. The AI then calls `ide_list_windows`, which shows each window's folders and debugger state, and `ide_select_window` (by folder name such as `wpcore.wpx`, path or id). The choice lasts for that AI session and survives window reloads.
+* **By where the AI was started**: if the same project is open in several windows or editors, the window you started the AI from wins. That's the chat panel's window, or the window whose integrated terminal you ran `claude` in (Blackbox sets `BLACKBOX_WINDOW` there; terminals opened before the extension started need restarting).
+* **Otherwise the AI chooses**: calls fail with a list of windows and their editors. The AI then calls `ide_list_windows`, which shows each window's editor, folders and debugger state, and `ide_select_window` (by folder name such as `wpcore.wpx`, path or id, plus `app` such as `"Cursor"` if needed). The choice lasts for that AI session and survives window reloads.
 
 To fix the choice in configuration instead, set one of these in the server's `env`:
 
 * `BLACKBOX_WORKSPACE`: a folder to match instead of the working directory.
-* `BLACKBOX_SOCKET`: a socket path to always use, e.g. `/tmp/blackbox/<pid>.sock`.
+* `BLACKBOX_SOCKET`: a socket path to always use, e.g. `/tmp/blackbox-501/<pid>.sock`.
 
 ## 📋 Requirements
 

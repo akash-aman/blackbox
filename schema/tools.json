@@ -105,10 +105,18 @@
         {
             "name": "debug_start",
             "displayName": "Start Debug Session",
-            "description": "Start a debug session for any language using the Debug Adapter Protocol.",
+            "description": "Start a debug session, preferably by the name of a launch configuration (configName) so its settings are used as-is; otherwise from type and request.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "configName": {
+                        "type": "string",
+                        "description": "Name of a launch configuration or compound"
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Workspace folder whose launch configuration to use"
+                    },
                     "type": {
                         "type": "string",
                         "description": "Debug adapter type (e.g. php, node, python, go, cppdbg)"
@@ -133,11 +141,7 @@
                         "type": "object",
                         "description": "Remote to local path mappings"
                     }
-                },
-                "required": [
-                    "type",
-                    "request"
-                ]
+                }
             }
         },
         {
@@ -153,27 +157,72 @@
         {
             "name": "debug_continue",
             "displayName": "Continue",
-            "description": "Resume execution after hitting a breakpoint."
+            "description": "Resume execution. Does not wait: call debug_wait_for_stop for the next pause.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread to act on (default: the paused or focused thread)"
+                    }
+                }
+            }
         },
         {
             "name": "debug_pause",
             "displayName": "Pause",
-            "description": "Pause a running program."
+            "description": "Pause a running program and report where it stopped.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread to act on (default: the paused or focused thread)"
+                    }
+                }
+            }
         },
         {
             "name": "debug_step_over",
             "displayName": "Step Over",
-            "description": "Execute the next line, stepping over function calls."
+            "description": "Execute the next line, stepping over calls, and report the new location.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread to act on (default: the paused or focused thread)"
+                    }
+                }
+            }
         },
         {
             "name": "debug_step_into",
             "displayName": "Step Into",
-            "description": "Step into the next function call."
+            "description": "Step into the next call and report the new location.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread to act on (default: the paused or focused thread)"
+                    }
+                }
+            }
         },
         {
             "name": "debug_step_out",
             "displayName": "Step Out",
-            "description": "Step out of the current function."
+            "description": "Step out of the current function and report the new location.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "number",
+                        "description": "Thread to act on (default: the paused or focused thread)"
+                    }
+                }
+            }
         },
         {
             "name": "debug_evaluate",
@@ -280,6 +329,63 @@
             }
         },
         {
+            "name": "debug_wait_for_stop",
+            "displayName": "Wait for Stop",
+            "description": "Wait until the debugger pauses and report the reason, file, line, function and top frames. Returns at once if already paused; returns state \"running\" on timeout.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "timeoutMs": {
+                        "type": "number",
+                        "description": "How long to wait (default 30000)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "debug_get_output",
+            "displayName": "Get Output",
+            "description": "Read program output and debug console messages, including logpoint messages, after a sequence number. Long entries are shortened; more is true when entries were left out.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "number",
+                        "description": "Return entries after this sequence number"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "stdout, stderr, console or important"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum entries (default 200)"
+                    },
+                    "match": {
+                        "type": "string",
+                        "description": "Only entries containing this text (case-insensitive)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "debug_set_exception_breakpoints",
+            "displayName": "Set Exception Breakpoints",
+            "description": "List the exception filters the debug adapter offers, or enable some of them for the active session.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "filters": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Filter ids to enable; empty to disable"
+                    }
+                }
+            }
+        },
+        {
             "name": "editor_open_file",
             "displayName": "Open File",
             "description": "Open a file in the editor, optionally at a specific line.",
@@ -359,6 +465,10 @@
                     "window": {
                         "type": "string",
                         "description": "Window id, absolute folder path, or folder name"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "Editor name or part of it, e.g. \"Cursor\""
                     }
                 }
             }

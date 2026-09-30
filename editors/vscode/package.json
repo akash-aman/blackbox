@@ -2,7 +2,7 @@
     "name": "blackbox-debug",
     "displayName": "Blackbox",
     "description": "AI-driven debugging — set breakpoints, start/stop debug sessions, inspect variables, and navigate code via MCP tools.",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "publisher": "akash-cx",
     "license": "MIT",
     "icon": "assets/logo-128.png",
@@ -253,7 +253,7 @@
         "@types/mocha": "^10.0.0",
         "@types/node": "^20.0.0",
         "@types/vscode": "^1.99.0",
-        "@vscode/test-electron": "^2.4.0",
+        "@vscode/test-electron": "^3.1.0",
         "eslint": "^9.0.0",
         "mocha": "^10.0.0",
         "typescript": "^5.5.0"

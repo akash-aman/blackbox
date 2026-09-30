@@ -16,11 +16,11 @@ export function registerIPCHandlers(ipc: IPCServer) {
     // ── Session Control ─────────────────────────────────────────
     ipc.register('debug_start', async (args) => impl.startDebug(args));
     ipc.register('debug_stop', async () => impl.stopDebug());
-    ipc.register('debug_continue', async () => impl.continueDebug());
-    ipc.register('debug_pause', async () => impl.pauseDebug());
-    ipc.register('debug_step_over', async () => impl.stepOver());
-    ipc.register('debug_step_into', async () => impl.stepInto());
-    ipc.register('debug_step_out', async () => impl.stepOut());
+    ipc.register('debug_continue', async (args) => impl.continueDebug(args as any));
+    ipc.register('debug_pause', async (args) => impl.pauseDebug(args as any));
+    ipc.register('debug_step_over', async (args) => impl.stepOver(args as any));
+    ipc.register('debug_step_into', async (args) => impl.stepInto(args as any));
+    ipc.register('debug_step_out', async (args) => impl.stepOut(args as any));
     ipc.register('debug_restart', async () => impl.restartDebug());
 
     // ── Inspection ──────────────────────────────────────────────
@@ -30,6 +30,9 @@ export function registerIPCHandlers(ipc: IPCServer) {
     ipc.register('debug_get_launch_configs', async () => impl.getLaunchConfigs());
     ipc.register('debug_inspect', async (args) => impl.inspect(args as any));
     ipc.register('debug_watch', async (args) => impl.watch(args as any));
+    ipc.register('debug_wait_for_stop', async (args) => impl.waitForStop(args as any));
+    ipc.register('debug_get_output', async (args) => impl.getOutput(args as any));
+    ipc.register('debug_set_exception_breakpoints', async (args) => impl.setExceptionBreakpoints(args as any));
 
     // ── Editor ──────────────────────────────────────────────────
     ipc.register('editor_open_file', async (args) => impl.openFile(args as any));

@@ -3,7 +3,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { RegistryEntry, ipcDir } from './protocol';
+import { LEGACY_IPC_DIR, RegistryEntry, UNKNOWN_APP, ipcDir, isPrivateDir } from './protocol';
 
 function isAlive(pid: number): boolean {
     try {
@@ -15,23 +15,30 @@ function isAlive(pid: number): boolean {
     }
 }
 
-// Returns registry entries of live windows. Entries left behind by crashed
-// extension hosts are removed along with their sockets.
-export function listWindows(): RegistryEntry[] {
-    const dir = ipcDir();
-    let names: string[];
-    try {
-        names = fs.readdirSync(dir).filter(n => n.endsWith('.json'));
-    } catch {
-        return [];
-    }
+// Fills fields that entries written by older extensions lack.
+function withDefaults(raw: Partial<RegistryEntry> & Pick<RegistryEntry, 'id' | 'pid' | 'socket'>): RegistryEntry {
+    return {
+        folders: [],
+        startedAt: 0,
+        focusedAt: 0,
+        app: UNKNOWN_APP,
+        appPid: 0,
+        extensionVersion: '',
+        protocol: 1,
+        ...raw,
+    };
+}
 
+function readDir(dir: string): RegistryEntry[] {
+    if (!isPrivateDir(dir)) {
+        return []; // Missing, or reachable by other users: never trust it.
+    }
     const entries: RegistryEntry[] = [];
-    for (const name of names) {
+    for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.json'))) {
         const file = path.join(dir, name);
         let entry: RegistryEntry;
         try {
-            entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+            entry = withDefaults(JSON.parse(fs.readFileSync(file, 'utf8')));
         } catch {
             continue; // Partially written or foreign file.
         }
@@ -43,6 +50,19 @@ export function listWindows(): RegistryEntry[] {
         entries.push(entry);
     }
     return entries;
+}
+
+// Returns registry entries of live windows. Entries left behind by crashed
+// extension hosts are removed along with their sockets.
+export function listWindows(): RegistryEntry[] {
+    const dirs = process.env.BLACKBOX_IPC_DIR ? [ipcDir()] : [ipcDir(), LEGACY_IPC_DIR];
+    const byId = new Map<string, RegistryEntry>();
+    for (const entry of dirs.flatMap(readDir)) {
+        if (!byId.has(entry.id)) {
+            byId.set(entry.id, entry);
+        }
+    }
+    return [...byId.values()];
 }
 
 function normalize(p: string): string {
@@ -75,15 +95,16 @@ export function matchWindows(entries: readonly RegistryEntry[], dir: string): Re
 }
 
 // Resolves a user-supplied window reference: an exact id, then a path,
-// then a folder name (case-insensitive).
-export function findWindows(entries: readonly RegistryEntry[], ref: string): RegistryEntry[] {
-    const byId = entries.filter(e => e.id === ref);
+// then a folder name (case-insensitive). `app` narrows it to one editor.
+export function findWindows(entries: readonly RegistryEntry[], ref: string, app?: string): RegistryEntry[] {
+    const scoped = app ? entries.filter(e => e.app.name.toLowerCase().includes(app.toLowerCase())) : entries;
+    const byId = scoped.filter(e => e.id === ref);
     if (byId.length > 0) {
         return byId;
     }
     if (path.isAbsolute(ref)) {
-        return matchWindows(entries, ref);
+        return matchWindows(scoped, ref);
     }
     const name = ref.toLowerCase();
-    return entries.filter(e => e.folders.some(f => path.basename(f).toLowerCase() === name));
+    return scoped.filter(e => e.folders.some(f => path.basename(f).toLowerCase() === name));
 }
